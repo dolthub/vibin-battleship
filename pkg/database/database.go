@@ -97,3 +97,68 @@ func (d *Database) CreateBoardStatesTable() error {
 
 	return nil
 }
+
+// Direction represents the orientation of a ship
+type Direction bool
+
+const (
+	Vertical   Direction = true
+	Horizontal Direction = false
+)
+
+// InsertShip inserts a ship into the database at the given position with the given length and direction
+func (d *Database) InsertShip(board string, x, y int, length int, direction Direction) error {
+	// Validate board type
+	if board != "red_ships" && board != "blue_ships" {
+		return fmt.Errorf("invalid board type: %s", board)
+	}
+
+	// Validate coordinates
+	if x < 0 || x > 9 || y < 0 || y > 9 {
+		return fmt.Errorf("coordinates out of bounds: (%d, %d)", x, y)
+	}
+
+	// Validate length
+	if length < 2 || length > 5 {
+		return fmt.Errorf("invalid ship length: %d", length)
+	}
+
+	// Check if ship fits on board based on direction
+	switch direction {
+	case Vertical:
+		if y+length > 9 {
+			return fmt.Errorf("ship too long to fit at position: (%d, %d) pointing north", x, y)
+		}
+	case Horizontal:
+		if x+length > 9 {
+			return fmt.Errorf("ship too long to fit at position: (%d, %d) pointing south", x, y)
+		}
+	}
+
+	// Insert each segment of the ship
+	for i := 0; i < length; i++ {
+		var newX, newY int
+		switch direction {
+		case Vertical:
+			newX, newY = x, y+i
+		case Horizontal:
+			newX, newY = x+i, y
+		}
+
+		query := `
+			INSERT INTO board_states (x, y, board, state)
+			VALUES (?, ?, ?, 'S')
+		`
+		_, err := d.db.Exec(query, newX, newY, board)
+		if err != nil {
+			return fmt.Errorf("failed to insert ship segment: %v", err)
+		}
+	}
+
+	return nil
+}
+
+// Query executes a query that returns rows
+func (d *Database) Query(query string, args ...interface{}) (*sql.Rows, error) {
+	return d.db.Query(query, args...)
+}

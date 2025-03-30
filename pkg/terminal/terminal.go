@@ -117,7 +117,7 @@ func (t *Terminal) PrintBoards(myShips, opponentShots, myShots map[Coordinate]st
 				switch value {
 				case "H":
 					fmt.Fprintf(t.output, "%s●%s|", Red, Reset)
-				case "X":
+				case "M":
 					fmt.Fprintf(t.output, "%s●%s|", Blue, Reset)
 				default:
 					fmt.Fprintf(t.output, "%s|", value)

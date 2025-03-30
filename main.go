@@ -26,6 +26,13 @@ func main() {
 		log.Fatalf("Failed to initialize database tables: %v", err)
 	}
 
+	// Insert a carrier (5 units) for the red player at position (0,0) pointing east
+	if err := db.InsertShip("red_ships", 0, 0, 5, database.Horizontal); err != nil {
+		log.Printf("Warning: Failed to insert ship: %v", err)
+	} else {
+		fmt.Println("Successfully inserted carrier ship for red player")
+	}
+
 	// Print welcome message in color
 	term.PrintWelcome()
 
@@ -44,21 +51,41 @@ func main() {
 		}
 	}
 
-	// Example data for demonstration
-	myShips := map[terminal.Coordinate]string{
-		{X: 0, Y: 0}: "S", // Ship at A0
-		{X: 1, Y: 0}: "S", // Ship at B0
-		{X: 2, Y: 0}: "S", // Ship at C0
+	// Retrieve the state of the board from the database
+	rows, err := db.Query("SELECT x, y, board, state FROM board_states")
+	if err != nil {
+		log.Fatalf("Failed to retrieve board state: %v", err)
+	}
+	defer rows.Close()
+
+	// Maps to hold the state of the board
+	myShips := make(map[terminal.Coordinate]string)
+	opponentShots := make(map[terminal.Coordinate]string)
+	myShots := make(map[terminal.Coordinate]string)
+
+	// Populate the maps with the retrieved data
+	for rows.Next() {
+		var x, y int
+		var board, state string
+		if err := rows.Scan(&x, &y, &board, &state); err != nil {
+			log.Fatalf("Failed to scan board state: %v", err)
+		}
+		coord := terminal.Coordinate{X: x, Y: y}
+		switch board {
+		case "red_ships":
+			myShips[coord] = state
+		case "blue_ships":
+			// Assuming blue_ships are opponent's ships
+			// This can be adjusted based on the actual game logic
+		case "red_shots":
+			myShots[coord] = state
+		case "blue_shots":
+			opponentShots[coord] = state
+		}
 	}
 
-	opponentShots := map[terminal.Coordinate]string{
-		{X: 7, Y: 3}: "H", // Hit at H3
-		{X: 5, Y: 5}: "X", // Miss at F5
-	}
-
-	myShots := map[terminal.Coordinate]string{
-		{X: 3, Y: 4}: "H", // Hit at D4
-		{X: 8, Y: 2}: "X", // Miss at I2
+	if err := rows.Err(); err != nil {
+		log.Fatalf("Error iterating over board state rows: %v", err)
 	}
 
 	// Display both boards
