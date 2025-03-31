@@ -165,13 +165,13 @@ func (c *WatchCommand) Execute(gameID string) error {
 
 		switch c.team {
 		case "red":
-			term.PrintBoards(redShips, blueShots, redShots)
+			term.PrintBoards(redShips, blueShots, redShots, "")
 		case "blue":
-			term.PrintBoards(blueShips, redShots, blueShots)
+			term.PrintBoards(blueShips, redShots, blueShots, "")
 		default:
 			// If no team specified, show both views
-			term.PrintBoards(redShips, blueShots, redShots)
-			term.PrintBoards(blueShips, redShots, blueShots)
+			term.PrintBoards(redShips, blueShots, redShots, "red")
+			term.PrintBoards(blueShips, redShots, blueShots, "blue")
 		}
 	}
 

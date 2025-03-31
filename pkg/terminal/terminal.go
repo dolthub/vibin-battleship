@@ -49,47 +49,24 @@ func (t *Terminal) PrintSuccess(msg string) {
 	fmt.Fprintf(t.output, "%s%s%s\n", Green, msg, Reset)
 }
 
-// printSingleBoard prints one board with the given positions
-func (t *Terminal) printSingleBoard(positions map[Coordinate]string) {
-	// Print column headers
-	fmt.Fprintf(t.output, "  ")
-	for col := 'A'; col <= 'J'; col++ {
-		fmt.Fprintf(t.output, "%c ", col)
-	}
-	fmt.Fprintln(t.output)
-
-	// Print top border
-	fmt.Fprintf(t.output, "  %s\n", strings.Repeat("-", 20))
-
-	// Print rows
-	for row := 0; row < 10; row++ {
-		fmt.Fprintf(t.output, "%d|", row)
-		for col := 0; col < 10; col++ {
-			coord := Coordinate{X: col, Y: row}
-			if value, exists := positions[coord]; exists {
-				switch value {
-				case "H":
-					fmt.Fprintf(t.output, "%s●%s|", Red, Reset)
-				case "X":
-					fmt.Fprintf(t.output, "%s●%s|", Blue, Reset)
-				default:
-					fmt.Fprintf(t.output, "%s|", value)
-				}
-			} else {
-				fmt.Fprintf(t.output, " |")
-			}
-		}
-		fmt.Fprintln(t.output)
-		fmt.Fprintf(t.output, "  %s\n", strings.Repeat("-", 20))
-	}
-}
-
 // PrintBoards displays both the player's board and the opponent's board side by side
-func (t *Terminal) PrintBoards(myShips, opponentShots, myShots map[Coordinate]string) {
+func (t *Terminal) PrintBoards(myShips, opponentShots, myShots map[Coordinate]string, team string) {
 	spaceWidth := strings.Repeat(" ", 10)
 
-	// Print board labels
-	fmt.Fprintf(t.output, "Their Shots/Your Ships%sYour Shots\n", spaceWidth)
+	// Print board labels based on team
+	var leftLabel, rightLabel string
+	switch team {
+	case "red":
+		leftLabel = "Blue Shots/Red Ships"
+		rightLabel = "Red Shots"
+	case "blue":
+		leftLabel = "Red Shots/Blue Ships"
+		rightLabel = "Blue Shots"
+	default:
+		leftLabel = "Their Shots/Your Ships"
+		rightLabel = "Your Shots"
+	}
+	fmt.Fprintf(t.output, "%s%s%s\n", leftLabel, spaceWidth, rightLabel)
 
 	// Print column headers for both boards
 	fmt.Fprintf(t.output, "  ")
