@@ -81,6 +81,17 @@ func (d *Database) Initialize() error {
 	if err := d.CreateBoardStatesTable(); err != nil {
 		return fmt.Errorf("failed to initialize database: %v", err)
 	}
+	if err := d.CreateCoinTable(); err != nil {
+		return fmt.Errorf("failed to initialize database: %v", err)
+	}
+
+	// Commit the current state to Dolt
+	commitMessage := "Create board_states and coin tables"
+	_, err := d.db.Exec("CALL DOLT_COMMIT('-A', '-m', ?)", commitMessage)
+	if err != nil {
+		log.Fatalf("Failed to commit to Dolt: %v", err)
+	}
+
 	return nil
 }
 
@@ -101,11 +112,21 @@ func (d *Database) CreateBoardStatesTable() error {
 		return fmt.Errorf("failed to create board_states table: %v", err)
 	}
 
-	// Commit the current state to Dolt
-	commitMessage := "Create board_states table"
-	_, err = d.db.Exec("CALL DOLT_COMMIT('-A', '-m', ?)", commitMessage)
+	return nil
+}
+
+// CreateCoinTable creates the coin table with the required schema
+func (d *Database) CreateCoinTable() error {
+	query := `
+		CREATE TABLE coin (
+			team ENUM('red', 'blue') PRIMARY KEY,
+			flip FLOAT NOT NULL
+		);
+	`
+
+	_, err := d.db.Exec(query)
 	if err != nil {
-		log.Fatalf("Failed to commit to Dolt: %v", err)
+		return fmt.Errorf("failed to create coin table: %v", err)
 	}
 
 	return nil
