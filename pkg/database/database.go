@@ -185,3 +185,23 @@ func (d *Database) Exec(query string, args ...interface{}) (sql.Result, error) {
 func (d *Database) QueryRow(query string, args ...interface{}) *sql.Row {
 	return d.db.QueryRow(query, args...)
 }
+
+// ProcessShot handles the logic for taking a shot at a position
+func (d *Database) ProcessShot(shotBoard, targetBoard string, x, y int) error {
+	// Prior to this we need to insert the "M" into the other board.
+
+	query := `
+		UPDATE board_states rs
+		JOIN board_states bs ON rs.x = bs.x AND rs.y = bs.y
+		SET rs.state = 'H'
+		WHERE rs.board = ? 
+		AND bs.board = ?
+		AND rs.x = ? AND rs.y = ?
+		AND bs.state = 'S'
+	`
+	_, err := d.db.Exec(query, shotBoard, targetBoard, x, y)
+	if err != nil {
+		return fmt.Errorf("failed to process shot: %v", err)
+	}
+	return nil
+}
