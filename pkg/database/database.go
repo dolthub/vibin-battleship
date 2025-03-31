@@ -3,9 +3,11 @@ package database
 import (
 	"database/sql"
 	"fmt"
+	"log"
 	"os"
+	"time"
 
-	_ "github.com/go-sql-driver/mysql"
+	"github.com/go-sql-driver/mysql"
 )
 
 // Database handles Dolt database operations
@@ -15,17 +17,29 @@ type Database struct {
 }
 
 // New creates a new Database instance
-func New(path string) (*Database, error) {
+func New(gameId string, path string) (*Database, error) {
 	// Ensure the database directory exists
 	if err := os.MkdirAll(path, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create database directory: %v", err)
 	}
 
-	// Connect to the Dolt database
-	db, err := sql.Open("mysql", "root:@tcp(localhost:9889)/battleship")
+	// Configure the database connection
+	cfg := mysql.NewConfig()
+	cfg.User = "root"
+	cfg.Passwd = ""
+	cfg.Addr = "localhost:9889"
+	cfg.DBName = fmt.Sprintf("battleship/game_%s", gameId)
+	cfg.ParseTime = true
+	cfg.Loc = time.Local
+
+	// Create the connector
+	connector, err := mysql.NewConnector(cfg)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to database: %v", err)
+		return nil, fmt.Errorf("failed to create connector: %v", err)
 	}
+
+	// Open the database connection
+	db := sql.OpenDB(connector)
 
 	// Test the connection
 	if err := db.Ping(); err != nil {
@@ -95,6 +109,13 @@ func (d *Database) CreateBoardStatesTable() error {
 		return fmt.Errorf("failed to create board_states table: %v", err)
 	}
 
+	// Commit the current state to Dolt
+	commitMessage := "Create board_states table"
+	_, err = d.db.Exec("CALL DOLT_COMMIT('-A', '-m', ?)", commitMessage)
+	if err != nil {
+		log.Fatalf("Failed to commit to Dolt: %v", err)
+	}
+
 	return nil
 }
 
@@ -161,4 +182,9 @@ func (d *Database) InsertShip(board string, x, y int, length int, direction Dire
 // Query executes a query that returns rows
 func (d *Database) Query(query string, args ...interface{}) (*sql.Rows, error) {
 	return d.db.Query(query, args...)
+}
+
+// Exec executes a query without returning rows
+func (d *Database) Exec(query string, args ...interface{}) (sql.Result, error) {
+	return d.db.Exec(query, args...)
 }

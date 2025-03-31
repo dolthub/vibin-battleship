@@ -13,9 +13,11 @@ func main() {
 	// Initialize terminal colors
 	term := terminal.New()
 
+	gameId := "1"
+
 	// Initialize database connection
 	dbPath := filepath.Join("..", "data")
-	db, err := database.New(dbPath)
+	db, err := database.New(gameId, dbPath)
 	if err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
@@ -91,4 +93,5 @@ func main() {
 	// Display both boards
 	fmt.Println("\nGame Boards:")
 	term.PrintBoards(myShips, opponentShots, myShots)
+
 }
