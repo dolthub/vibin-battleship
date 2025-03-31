@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"math/rand"
 	"time"
 
 	"github.com/go-sql-driver/mysql"
@@ -244,6 +245,67 @@ func (d *Database) ProcessShot(shotBoard, targetBoard string, x, y int) error {
 	_, err = d.db.Exec(query, shotBoard, targetBoard, x, y)
 	if err != nil {
 		return fmt.Errorf("failed to process shot: %v", err)
+	}
+
+	return nil
+}
+
+// PlaceRandomShips places all ships randomly on the board for a team
+func (d *Database) PlaceRandomShips(team string) error {
+	ships := []struct {
+		length int
+	}{
+		{5}, // Carrier
+		{4}, // Battleship
+		{3}, // Cruiser
+		{3}, // Submarine
+		{2}, // Destroyer
+	}
+
+	board := fmt.Sprintf("%s_ships", team)
+	for _, ship := range ships {
+		for {
+			// Generate random position and direction
+			x := rand.Intn(10)
+			y := rand.Intn(10)
+			direction := Direction(rand.Float32() < 0.5)
+
+			// Check if ship fits on board
+			if direction == Vertical && y+ship.length > 9 {
+				continue
+			}
+			if direction == Horizontal && x+ship.length > 9 {
+				continue
+			}
+
+			// Check if position is already occupied
+			occupied := false
+			for i := 0; i < ship.length; i++ {
+				var count int
+				checkX, checkY := x, y
+				if direction == Vertical {
+					checkY += i
+				} else {
+					checkX += i
+				}
+				err := d.db.QueryRow("SELECT COUNT(*) FROM board_states WHERE board = ? AND x = ? AND y = ?", board, checkX, checkY).Scan(&count)
+				if err != nil {
+					return fmt.Errorf("failed to check position: %v", err)
+				}
+				if count > 0 {
+					occupied = true
+					break
+				}
+			}
+
+			if !occupied {
+				err := d.InsertShip(board, x, y, ship.length, direction)
+				if err != nil {
+					return fmt.Errorf("failed to insert ship: %v", err)
+				}
+				break
+			}
+		}
 	}
 
 	return nil

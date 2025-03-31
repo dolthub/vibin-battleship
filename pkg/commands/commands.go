@@ -59,13 +59,13 @@ func (c *StartCommand) Execute(gameID string) error {
 	if gameID == "" {
 		return fmt.Errorf("start command requires a game ID")
 	}
-	// TODO: Implement game start logic
+
 	// Initialize the database
 	if err := c.db.Initialize(); err != nil {
 		return fmt.Errorf("failed to initialize database: %v", err)
 	}
 
-	fmt.Printf("Game with ID %s has been started.\n", gameID)
+	fmt.Printf("Game with ID %s has been started. Join as red or blue team to place ships.\n", gameID)
 	return nil
 }
 
@@ -74,12 +74,21 @@ func (c *JoinRedCommand) Execute(gameID string) error {
 	if gameID == "" {
 		return fmt.Errorf("join-red command requires a game ID")
 	}
-	// TODO: Implement game join logic for red team
 	fmt.Printf("Joining game with ID: %s as Red team\n", gameID)
 
 	// Insert random number for red team
 	if err := c.db.InsertCoin("red"); err != nil {
 		return fmt.Errorf("failed to insert coin: %v", err)
+	}
+
+	// Place random ships for red team
+	if err := c.db.PlaceRandomShips("red"); err != nil {
+		return fmt.Errorf("failed to place red ships: %v", err)
+	}
+	// Commit the changes to the database with a message indicating the red team has joined
+	_, err := c.db.Exec("CALL DOLT_COMMIT('-a', '-m', ?)", "Red team has joined the game and placed their ships")
+	if err != nil {
+		return fmt.Errorf("failed to commit changes: %v", err)
 	}
 
 	// Use watch command to show the game state for red team
@@ -92,12 +101,22 @@ func (c *JoinBlueCommand) Execute(gameID string) error {
 	if gameID == "" {
 		return fmt.Errorf("join-blue command requires a game ID")
 	}
-	// TODO: Implement game join logic for blue team
 	fmt.Printf("Joining game with ID: %s as Blue team\n", gameID)
 
 	// Insert random number for blue team
 	if err := c.db.InsertCoin("blue"); err != nil {
 		return fmt.Errorf("failed to insert coin: %v", err)
+	}
+
+	// Place random ships for blue team
+	if err := c.db.PlaceRandomShips("blue"); err != nil {
+		return fmt.Errorf("failed to place blue ships: %v", err)
+	}
+
+	// Commit the changes to the database with a message indicating the blue team has joined
+	_, err := c.db.Exec("CALL DOLT_COMMIT('-a', '-m', ?)", "Blue team has joined the game and placed their ships")
+	if err != nil {
+		return fmt.Errorf("failed to commit changes: %v", err)
 	}
 
 	// Use watch command to show the game state for blue team
