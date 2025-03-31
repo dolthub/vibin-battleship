@@ -49,7 +49,12 @@ func (c *StartCommand) Execute(gameID string) error {
 		return fmt.Errorf("start command requires a game ID")
 	}
 	// TODO: Implement game start logic
-	fmt.Printf("Starting new game with ID: %s\n", gameID)
+	// Initialize the database
+	if err := c.db.Initialize(); err != nil {
+		return fmt.Errorf("failed to initialize database: %v", err)
+	}
+
+	fmt.Printf("Game with ID %s has been started.\n", gameID)
 	return nil
 }
 
@@ -69,7 +74,26 @@ func (c *WatchCommand) Execute(gameID string) error {
 		return fmt.Errorf("watch command requires a game ID")
 	}
 
+	// Track the ID of the DB
+	var previousRootID string
+
 	for {
+		// Call the `SELECT dolt_hashof_db();` function to get the root ID of the DB
+		var rootID string
+		err := c.db.QueryRow("SELECT dolt_hashof_db()").Scan(&rootID)
+		if err != nil {
+			return fmt.Errorf("failed to get root ID: %v", err)
+		}
+
+		if previousRootID != rootID {
+			fmt.Printf("Root ID of the database has changed: %s\n", rootID)
+			previousRootID = rootID
+		} else {
+			// Sleep for a short duration before querying the database again
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+
 		// Query the database for the current state of the game
 		rows, err := c.db.Query("SELECT x, y, board, state FROM board_states ORDER BY board, x, y")
 		if err != nil {
@@ -110,15 +134,12 @@ func (c *WatchCommand) Execute(gameID string) error {
 
 		// Print the current state of the game for both players
 		term := terminal.New()
+		fmt.Printf("Current time: %s\n", time.Now().Format(time.RFC1123))
 		term.PrintBoards(redShips, blueShots, redShots)
 		term.PrintBoards(blueShips, redShots, blueShots)
 
-		// Sleep for a short duration before querying the database again
-		time.Sleep(2 * time.Second)
 	}
 
-	// TODO: Implement game watch logic
-	fmt.Printf("Watching game with ID: %s\n", gameID)
 	return nil
 }
 

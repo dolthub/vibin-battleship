@@ -180,3 +180,8 @@ func (d *Database) Query(query string, args ...interface{}) (*sql.Rows, error) {
 func (d *Database) Exec(query string, args ...interface{}) (sql.Result, error) {
 	return d.db.Exec(query, args...)
 }
+
+// QueryRow executes a query that is expected to return at most one row
+func (d *Database) QueryRow(query string, args ...interface{}) *sql.Row {
+	return d.db.QueryRow(query, args...)
+}
