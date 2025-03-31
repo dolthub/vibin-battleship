@@ -77,6 +77,11 @@ func (c *JoinRedCommand) Execute(gameID string) error {
 	// TODO: Implement game join logic for red team
 	fmt.Printf("Joining game with ID: %s as Red team\n", gameID)
 
+	// Insert random number for red team
+	if err := c.db.InsertCoin("red"); err != nil {
+		return fmt.Errorf("failed to insert coin: %v", err)
+	}
+
 	// Use watch command to show the game state for red team
 	watchCmd := NewWatchCommand(c.db, "red")
 	return watchCmd.Execute(gameID)
@@ -89,6 +94,11 @@ func (c *JoinBlueCommand) Execute(gameID string) error {
 	}
 	// TODO: Implement game join logic for blue team
 	fmt.Printf("Joining game with ID: %s as Blue team\n", gameID)
+
+	// Insert random number for blue team
+	if err := c.db.InsertCoin("blue"); err != nil {
+		return fmt.Errorf("failed to insert coin: %v", err)
+	}
 
 	// Use watch command to show the game state for blue team
 	watchCmd := NewWatchCommand(c.db, "blue")
@@ -105,7 +115,6 @@ func (c *WatchCommand) Execute(gameID string) error {
 	var previousRootID string
 
 	for {
-
 		// Call the `SELECT dolt_hashof_db();` function to get the root ID of the DB
 		var rootID string
 		err := c.db.QueryRow("SELECT dolt_hashof_db()").Scan(&rootID)
@@ -123,6 +132,29 @@ func (c *WatchCommand) Execute(gameID string) error {
 		}
 		// Clear the terminal using a function from the terminal package
 		terminal.ClearScreen()
+
+		// Query the database for the current state of the coin table
+		coinRows, err := c.db.Query("SELECT team, flip FROM coin ORDER BY team")
+		if err != nil {
+			return fmt.Errorf("failed to query coin table: %v", err)
+		}
+		defer coinRows.Close()
+
+		// Print the current state of the coin table
+		fmt.Println("Current state of the coin table:")
+		for coinRows.Next() {
+			var team string
+			var flip float64
+			if err := coinRows.Scan(&team, &flip); err != nil {
+				return fmt.Errorf("failed to scan coin row: %v", err)
+			}
+			fmt.Printf("Team: %s, Flip: %f\n", team, flip)
+		}
+
+		if err := coinRows.Err(); err != nil {
+			return fmt.Errorf("error iterating coin rows: %v", err)
+		}
+
 
 		// Query the database for the current state of the game
 		rows, err := c.db.Query("SELECT x, y, board, state FROM board_states ORDER BY board, x, y")

@@ -207,6 +207,19 @@ func (d *Database) QueryRow(query string, args ...interface{}) *sql.Row {
 	return d.db.QueryRow(query, args...)
 }
 
+// InsertCoin inserts a random number for a team in the coin table
+func (d *Database) InsertCoin(team string) error {
+	query := `
+		INSERT INTO coin (team, flip)
+		VALUES (?, RAND())
+	`
+	_, err := d.db.Exec(query, team)
+	if err != nil {
+		return fmt.Errorf("failed to insert coin: %v", err)
+	}
+	return nil
+}
+
 // ProcessShot handles the logic for taking a shot at a position
 func (d *Database) ProcessShot(shotBoard, targetBoard string, x, y int) error {
 	// Prior to this we need to insert the "M" into the other board.
