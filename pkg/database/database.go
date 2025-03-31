@@ -193,7 +193,8 @@ func (d *Database) ProcessShot(shotBoard, targetBoard string, x, y int) error {
 	query := `
 		UPDATE board_states rs
 		JOIN board_states bs ON rs.x = bs.x AND rs.y = bs.y
-		SET rs.state = 'H'
+		SET rs.state = 'H',
+			bs.state = 'H'
 		WHERE rs.board = ? 
 		AND bs.board = ?
 		AND rs.x = ? AND rs.y = ?

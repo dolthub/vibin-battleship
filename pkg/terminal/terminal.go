@@ -111,8 +111,15 @@ func (t *Terminal) PrintBoards(myShips, opponentShots, myShots map[Coordinate]st
 		fmt.Fprintf(t.output, "%d|", row)
 		for col := 0; col < 10; col++ {
 			coord := Coordinate{X: col, Y: row}
-			if _, exists := myShips[coord]; exists {
-				fmt.Fprintf(t.output, "●|")
+			if value, exists := myShips[coord]; exists {
+				switch value {
+				case "H":
+					fmt.Fprintf(t.output, "%s●%s|", Red, Reset)
+				case "S":
+					fmt.Fprintf(t.output, "●|")
+				default:
+					fmt.Fprintf(t.output, "●|")
+				}
 			} else if value, exists := opponentShots[coord]; exists {
 				switch value {
 				case "H":
