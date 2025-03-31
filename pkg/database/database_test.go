@@ -1,16 +1,12 @@
 package database
 
 import (
-	"os"
 	"testing"
 )
 
 func setupTestDB(t *testing.T) (*Database, func()) {
-	// Create a temporary directory for the test database
-	tmpDir := t.TempDir()
-
 	// Create a new database instance
-	db, err := New("testId", tmpDir)
+	db, err := New("testId")
 	if err != nil {
 		t.Fatalf("Failed to create test database: %v", err)
 	}
@@ -23,7 +19,6 @@ func setupTestDB(t *testing.T) (*Database, func()) {
 	// Return cleanup function
 	cleanup := func() {
 		db.Close()
-		os.RemoveAll(tmpDir)
 	}
 
 	return db, cleanup

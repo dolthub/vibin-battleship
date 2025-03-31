@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
-	"os"
 	"time"
 
 	"github.com/go-sql-driver/mysql"
@@ -12,17 +11,11 @@ import (
 
 // Database handles Dolt database operations
 type Database struct {
-	path string
-	db   *sql.DB
+	db *sql.DB
 }
 
 // New creates a new Database instance
-func New(gameId string, path string) (*Database, error) {
-	// Ensure the database directory exists
-	if err := os.MkdirAll(path, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create database directory: %v", err)
-	}
-
+func New(gameId string) (*Database, error) {
 	// Configure the database connection
 	cfg := mysql.NewConfig()
 	cfg.User = "root"
@@ -47,8 +40,7 @@ func New(gameId string, path string) (*Database, error) {
 	}
 
 	return &Database{
-		path: path,
-		db:   db,
+		db: db,
 	}, nil
 }
 
