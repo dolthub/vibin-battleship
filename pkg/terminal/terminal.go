@@ -49,6 +49,11 @@ func (t *Terminal) PrintSuccess(msg string) {
 	fmt.Fprintf(t.output, "%s%s%s\n", Green, msg, Reset)
 }
 
+// ClearScreen clears the terminal screen
+func ClearScreen() {
+	fmt.Print("\033[H\033[2J")
+}
+
 // PrintBoards displays both the player's board and the opponent's board side by side
 func (t *Terminal) PrintBoards(myShips, opponentShots, myShots map[Coordinate]string, team string) {
 	spaceWidth := strings.Repeat(" ", 10)

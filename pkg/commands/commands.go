@@ -105,6 +105,7 @@ func (c *WatchCommand) Execute(gameID string) error {
 	var previousRootID string
 
 	for {
+
 		// Call the `SELECT dolt_hashof_db();` function to get the root ID of the DB
 		var rootID string
 		err := c.db.QueryRow("SELECT dolt_hashof_db()").Scan(&rootID)
@@ -120,6 +121,8 @@ func (c *WatchCommand) Execute(gameID string) error {
 			time.Sleep(500 * time.Millisecond)
 			continue
 		}
+		// Clear the terminal using a function from the terminal package
+		terminal.ClearScreen()
 
 		// Query the database for the current state of the game
 		rows, err := c.db.Query("SELECT x, y, board, state FROM board_states ORDER BY board, x, y")
@@ -162,6 +165,7 @@ func (c *WatchCommand) Execute(gameID string) error {
 		// Print the current state of the game for the current team
 		term := terminal.New()
 		fmt.Printf("Current time: %s\n", time.Now().Format(time.RFC1123))
+		fmt.Printf("Database root ID: %s\n", previousRootID)
 
 		switch c.team {
 		case "red":
