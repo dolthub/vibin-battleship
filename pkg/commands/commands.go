@@ -140,21 +140,40 @@ func (c *WatchCommand) Execute(gameID string) error {
 		}
 		defer coinRows.Close()
 
-		// Print the current state of the coin table
-		fmt.Println("Current state of the coin table:")
-		for coinRows.Next() {
-			var team string
-			var flip float64
-			if err := coinRows.Scan(&team, &flip); err != nil {
-				return fmt.Errorf("failed to scan coin row: %v", err)
+		myTurn := false
+
+		// Determine if it's the specified team's turn based on the coin toss
+		if c.team != "" {
+			var redFlip, blueFlip float64
+
+			// Extract the flip values for both teams from the previously queried data
+			rowCount := 0
+
+			for coinRows.Next() {
+				rowCount++
+				var team string
+				var flip float64
+				if err := coinRows.Scan(&team, &flip); err != nil {
+					return fmt.Errorf("failed to scan coin row: %v", err)
+				}
+				if team == "red" {
+					redFlip = flip
+				} else if team == "blue" {
+					blueFlip = flip
+				}
+				fmt.Printf("Team: %s, Flip: %f\n", team, flip)
 			}
-			fmt.Printf("Team: %s, Flip: %f\n", team, flip)
-		}
+			if rowCount != 2 {
+				fmt.Println("The game hasn't started yet.")
+				time.Sleep(500 * time.Millisecond)
+				continue
+			}
 
-		if err := coinRows.Err(); err != nil {
-			return fmt.Errorf("error iterating coin rows: %v", err)
+			// Determine if it's the specified team's turn
+			if (c.team == "red" && redFlip >= blueFlip) || (c.team == "blue" && blueFlip > redFlip) {
+				myTurn = true
+			}
 		}
-
 
 		// Query the database for the current state of the game
 		rows, err := c.db.Query("SELECT x, y, board, state FROM board_states ORDER BY board, x, y")
@@ -209,6 +228,88 @@ func (c *WatchCommand) Execute(gameID string) error {
 			term.PrintBoards(redShips, blueShots, redShots, "red")
 			term.PrintBoards(blueShips, redShots, blueShots, "blue")
 		}
+
+		if myTurn {
+			var input string
+			var x, y int
+			for {
+				fmt.Print("Enter coordinates (e.g. D3): ")
+				_, err := fmt.Scan(&input)
+				if err != nil {
+					fmt.Println("Invalid input. Please enter a letter (A-J) followed by a number (0-9).")
+					continue
+				}
+				if len(input) != 2 {
+					fmt.Println("Input must be exactly 2 characters (e.g. D3).")
+					continue
+				}
+
+				// Convert letter to x coordinate (A=0, B=1, etc.)
+				x = int(input[0] - 'A')
+				if x < 0 || x > 9 {
+					fmt.Println("First character must be a letter A-J.")
+					continue
+				}
+
+				// Convert number to y coordinate
+				y = int(input[1] - '0')
+				if y < 0 || y > 9 {
+					fmt.Println("Second character must be a number 0-9.")
+					continue
+				}
+				break
+			}
+
+			// Process the shot
+			opponent := "blue"
+			if c.team == "blue" {
+				opponent = "red"
+			}
+			err = c.db.ProcessShot(fmt.Sprintf("%s_shots", c.team), fmt.Sprintf("%s_ships", opponent), x, y)
+			if err != nil {
+				return fmt.Errorf("failed to process shot: %v", err)
+			}
+
+			// Update the coin flip values for both teams in a single query
+			query := `
+				UPDATE coin 
+				SET flip = CASE 
+					WHEN team = ? THEN 0.1 
+					WHEN team = ? THEN 0.9 
+				END
+				WHERE team IN (?, ?)
+			`
+			_, err = c.db.Exec(query, c.team, opponent, c.team, opponent)
+			if err != nil {
+				return fmt.Errorf("failed to update coin values: %v", err)
+			}
+
+			// Determine if the shot was a hit or a miss
+			var state string
+			query = `
+				SELECT state 
+				FROM board_states 
+				WHERE board = ? AND x = ? AND y = ?
+			`
+			err = c.db.QueryRow(query, fmt.Sprintf("%s_shots", c.team), x, y).Scan(&state)
+			if err != nil {
+				return fmt.Errorf("failed to determine shot result: %v", err)
+			}
+
+			// Create a detailed commit message
+			commitMessage := fmt.Sprintf("Team %s shot at (%c%d) and it was a %s", c.team, 'A'+x, y, map[string]string{"H": "hit", "M": "miss"}[state])
+
+			// Commit the changes to the database with the detailed message
+			_, err = c.db.Exec("CALL DOLT_COMMIT('-a', '-m', ?)", commitMessage)
+			if err != nil {
+				return fmt.Errorf("failed to commit changes: %v", err)
+			}
+
+			fmt.Println("Shot processed successfully!")
+		} else {
+			fmt.Println("Waiting for the other team to make a move...")
+		}
+
 	}
 
 	return nil

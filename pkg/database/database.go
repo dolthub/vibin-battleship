@@ -222,9 +222,16 @@ func (d *Database) InsertCoin(team string) error {
 
 // ProcessShot handles the logic for taking a shot at a position
 func (d *Database) ProcessShot(shotBoard, targetBoard string, x, y int) error {
-	// Prior to this we need to insert the "M" into the other board.
-
 	query := `
+		INSERT INTO board_states (x, y, board, state)
+		VALUES (?, ?, ?, 'M')
+	`
+	_, err := d.db.Exec(query, x, y, shotBoard)
+	if err != nil {
+		return fmt.Errorf("failed to insert miss: %v", err)
+	}
+
+	query = `
 		UPDATE board_states rs
 		JOIN board_states bs ON rs.x = bs.x AND rs.y = bs.y
 		SET rs.state = 'H',
@@ -234,9 +241,10 @@ func (d *Database) ProcessShot(shotBoard, targetBoard string, x, y int) error {
 		AND rs.x = ? AND rs.y = ?
 		AND bs.state = 'S'
 	`
-	_, err := d.db.Exec(query, shotBoard, targetBoard, x, y)
+	_, err = d.db.Exec(query, shotBoard, targetBoard, x, y)
 	if err != nil {
 		return fmt.Errorf("failed to process shot: %v", err)
 	}
+
 	return nil
 }
