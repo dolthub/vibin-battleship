@@ -598,3 +598,17 @@ func (db *DB) BothPlayersPlacedShips() (bool, error) {
 	// Both players should have 17 total ship squares (5+4+3+3+2)
 	return redShips == 17 && blueShips == 17, nil
 }
+
+func (db *DB) PlayerHasPlacedShips(player string) (bool, error) {
+	tableName := fmt.Sprintf("%s_board", player)
+	var shipCount int
+	
+	query := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE content NOT IN (?, ?)", tableName)
+	err := db.conn.QueryRow(query, string(HIT_CHAR), string(MISS_CHAR)).Scan(&shipCount)
+	if err != nil {
+		return false, fmt.Errorf("failed to count %s ships: %w", player, err)
+	}
+	
+	// Player should have 17 total ship squares (5+4+3+3+2)
+	return shipCount == 17, nil
+}

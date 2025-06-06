@@ -1034,3 +1034,148 @@ func TestCheckGameCompleteFromDifferentBranch(t *testing.T) {
 	assert.Equal(t, gameComplete, gameComplete2, "Results should be consistent")
 	assert.Equal(t, winner, winner2, "Results should be consistent")
 }
+
+func TestPlayCommandSkipsShipPlacementWhenAlreadyPlaced(t *testing.T) {
+	harness := NewTestHarness(t)
+	defer harness.Cleanup()
+
+	// Create a new game first
+	newOutput := harness.RunBattleshipCommand(t, "new")
+	gameID := extractGameID(t, newOutput)
+
+	// Have red player join (this will place ships automatically in test mode)
+	redOutput := harness.RunBattleshipCommand(t, "join", gameID, "red")
+	assert.Contains(t, redOutput, "Joined game", "Expected red join confirmation")
+
+	// Switch to the game branch and manually place ships to simulate a complete setup
+	err := harness.DB.CheckoutBranch(gameID)
+	require.NoError(t, err, "Failed to checkout game branch")
+
+	// Place all ships for red player to create a complete setup
+	redShips := []struct {
+		ship         Ship
+		startX       string
+		startY       int
+		isHorizontal bool
+	}{
+		{Ships[0], "A", 1, true},  // Carrier A1-E1 (horizontal)
+		{Ships[1], "A", 3, true},  // Battleship A3-D3 (horizontal) 
+		{Ships[2], "F", 1, false}, // Cruiser F1-F3 (vertical)
+		{Ships[3], "H", 1, false}, // Submarine H1-H3 (vertical)
+		{Ships[4], "J", 5, false}, // Destroyer J5-J6 (vertical)
+	}
+	
+	for _, shipPlacement := range redShips {
+		err := harness.DB.PlaceShip("red", shipPlacement.ship.Char, shipPlacement.startX, shipPlacement.startY, shipPlacement.isHorizontal, shipPlacement.ship.Length)
+		require.NoError(t, err, "Failed to place red %s", shipPlacement.ship.Name)
+	}
+
+	// Place all ships for blue player as well
+	blueShips := []struct {
+		ship         Ship
+		startX       string
+		startY       int
+		isHorizontal bool
+	}{
+		{Ships[0], "A", 6, true},  // Carrier A6-E6 (horizontal)
+		{Ships[1], "A", 8, true},  // Battleship A8-D8 (horizontal)
+		{Ships[2], "F", 6, false}, // Cruiser F6-F8 (vertical)
+		{Ships[3], "H", 6, false}, // Submarine H6-H8 (vertical)
+		{Ships[4], "J", 9, false}, // Destroyer J9-J10 (vertical)
+	}
+	
+	for _, shipPlacement := range blueShips {
+		err := harness.DB.PlaceShip("blue", shipPlacement.ship.Char, shipPlacement.startX, shipPlacement.startY, shipPlacement.isHorizontal, shipPlacement.ship.Length)
+		require.NoError(t, err, "Failed to place blue %s", shipPlacement.ship.Name)
+	}
+
+	// Commit ship placements
+	if _, err := harness.DB.conn.Exec("CALL DOLT_ADD('red_board', 'blue_board')"); err != nil {
+		require.NoError(t, err, "Failed to stage board tables")
+	}
+	if err := harness.DB.CommitChanges("Place all ships for both players"); err != nil {
+		require.NoError(t, err, "Failed to commit ship placements")
+	}
+
+	// Verify both players have placed ships
+	hasRedShips, err := harness.DB.PlayerHasPlacedShips("red")
+	require.NoError(t, err, "Failed to check if red player has ships")
+	assert.True(t, hasRedShips, "Red player should have ships placed")
+
+	hasBlueShips, err := harness.DB.PlayerHasPlacedShips("blue")
+	require.NoError(t, err, "Failed to check if blue player has ships")
+	assert.True(t, hasBlueShips, "Blue player should have ships placed")
+
+	// Test the critical functionality: when play command is called on a game
+	// where ships are already placed, it should NOT prompt for ship placement
+	// Instead, it should recognize existing ships and proceed to game loop
+
+	// Capture the play command output
+	// Note: In test mode, the game loop will run but since we're not providing input,
+	// it would hang. The key is to verify the initial output shows recognition
+	// of existing ships rather than prompting for new ship placement.
+
+	// Redirect to capture output without hanging on game loop
+	r, w, _ := os.Pipe()
+	oldStdout := os.Stdout
+	os.Stdout = w
+
+	// Set up a go routine to stop the play command after a short time
+	done := make(chan bool)
+	go func() {
+		time.Sleep(500 * time.Millisecond) // Give it time to show initial output
+		done <- true
+	}()
+
+	// Set up command args for play
+	oldArgs := os.Args
+	defer func() { os.Args = oldArgs }()
+	os.Args = []string{"battleship", "play", gameID, "red"}
+
+	// Set testing environment
+	oldTestingEnv := os.Getenv("BATTLESHIP_TESTING")
+	os.Setenv("BATTLESHIP_TESTING", "true")
+	defer os.Setenv("BATTLESHIP_TESTING", oldTestingEnv)
+
+	// Run the play command in a goroutine so we can time it out
+	outputChan := make(chan string, 1)
+	go func() {
+		// Run with test database config
+		runMain("127.0.0.1", strconv.Itoa(harness.Port), harness.DBName)
+		outputChan <- "completed"
+	}()
+
+	// Wait for either completion or timeout
+	select {
+	case <-done:
+		// Timeout reached, restore output and read what we captured
+		w.Close()
+		os.Stdout = oldStdout
+
+		buf := make([]byte, 2048)
+		n, _ := r.Read(buf)
+		output := string(buf[:n])
+
+		// The key assertion: output should indicate ships are already placed
+		// and should NOT contain ship placement prompts
+		assert.Contains(t, output, "Welcome back, red player! Ships are already placed", 
+			"Play command should recognize existing ships")
+		assert.NotContains(t, output, "place your ships on the board", 
+			"Play command should NOT prompt for ship placement when ships already exist")
+		assert.NotContains(t, output, "Placing Carrier", 
+			"Play command should NOT prompt for placing individual ships when ships already exist")
+		
+		t.Logf("Play command output: %s", output)
+		return
+	case <-outputChan:
+		// Command completed normally (shouldn't happen in this test)
+		w.Close()
+		os.Stdout = oldStdout
+		t.Log("Play command completed normally")
+	case <-time.After(2 * time.Second):
+		// Emergency timeout
+		w.Close() 
+		os.Stdout = oldStdout
+		t.Fatal("Play command test timed out")
+	}
+}

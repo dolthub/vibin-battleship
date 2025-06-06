@@ -633,13 +633,86 @@ func handlePlay(db *DB) {
 		return
 	}
 
-	// Use existing join logic to set up the game and place ships
-	handleJoinGame(db)
+	// First check if game exists in main branch (games table)
+	var gameExists int
+	err := db.conn.QueryRow("SELECT COUNT(*) FROM games WHERE id = ?", gameID).Scan(&gameExists)
+	if err != nil {
+		fmt.Printf("Failed to check if game exists: %v\n", err)
+		return
+	}
 
-	// Checkout to the game branch for the play session
+	if gameExists == 0 {
+		fmt.Printf("Game %s does not exist\n", gameID)
+		return
+	}
+
+	// Check if game branch exists (created when first player joins)
+	branchExists, err := db.BranchExists(gameID)
+	if err != nil {
+		fmt.Printf("Failed to check if game branch exists: %v\n", err)
+		return
+	}
+
+	// If no branch exists, player needs to join first
+	if !branchExists {
+		fmt.Printf("Joining game %s as %s player...\n", gameID, player)
+		handleJoinGame(db)
+		return
+	}
+
+	// Checkout to the game branch to check player status
 	if err := db.CheckoutBranch(gameID); err != nil {
 		fmt.Printf("Failed to checkout game branch: %v\n", err)
 		return
+	}
+
+	// Check if this player has already joined and placed ships
+	var playerInTurn int
+	err = db.conn.QueryRow("SELECT COUNT(*) FROM turn WHERE player = ?", player).Scan(&playerInTurn)
+	if err != nil {
+		fmt.Printf("Failed to check if %s player has joined: %v\n", player, err)
+		return
+	}
+
+	if playerInTurn == 0 {
+		// Player hasn't joined yet, use join logic
+		fmt.Printf("Joining game %s as %s player...\n", gameID, player)
+		handleJoinGame(db)
+		return
+	}
+
+	// Check if player has placed ships
+	hasShips, err := db.PlayerHasPlacedShips(player)
+	if err != nil {
+		fmt.Printf("Failed to check if %s player has placed ships: %v\n", player, err)
+		return
+	}
+
+	if !hasShips {
+		// Player joined but hasn't placed ships yet
+		fmt.Printf("Placing ships for %s player...\n", player)
+		if err := placeShipsForPlayer(db, player); err != nil {
+			fmt.Printf("Failed to place ships: %v\n", err)
+			return
+		}
+
+		// Commit ship placements
+		if _, err := db.conn.Exec(fmt.Sprintf("CALL DOLT_ADD('%s_board')", player)); err != nil {
+			fmt.Printf("Failed to stage ship placements: %v\n", err)
+			return
+		}
+
+		if _, err := db.conn.Exec(fmt.Sprintf("CALL DOLT_COMMIT('-m', '%s player placed ships')", player)); err != nil {
+			fmt.Printf("Failed to commit ship placements: %v\n", err)
+			return
+		}
+
+		fmt.Printf("\n%s player has completed ship placement!\n", player)
+		displayPlayerBoard(db, player)
+	} else {
+		// Player has already placed ships, proceed to game
+		fmt.Printf("Welcome back, %s player! Ships are already placed.\n", player)
+		displayPlayerBoard(db, player)
 	}
 
 	// Wait for both players to place ships
