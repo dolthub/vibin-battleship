@@ -51,6 +51,12 @@ func GetShipNameByChar(char rune) string {
 	return "Unknown"
 }
 
+// clearTerminal clears the terminal screen for a clean interface
+func clearTerminal() {
+	// ANSI escape sequence to clear screen and move cursor to top-left
+	fmt.Print("\033[2J\033[H")
+}
+
 func main() {
 	runMain("127.0.0.1", "3306", "battleship")
 }
@@ -746,8 +752,22 @@ func handlePlay(db *DB) {
 		fmt.Printf("%s player goes first (value: %.9f)\n", strings.ToUpper(firstPlayer[:1])+firstPlayer[1:], firstValue)
 	}
 
+	// Clear terminal for clean game interface while preserving setup info
+	clearTerminal()
+	
 	// Main game loop
-	fmt.Println("\n=== GAME STARTED ===")
+	fmt.Println("=== GAME STARTED ===")
+	
+	// Ensure we're on the correct game branch before displaying board
+	if err := db.CheckoutBranch(gameID); err != nil {
+		fmt.Printf("Failed to checkout game branch: %v\n", err)
+		return
+	}
+	
+	// Display initial board state
+	fmt.Printf("\nCurrent game state:\n")
+	displayPlayerBoard(db, player)
+	
 	for {
 		// Check if game is complete
 		gameComplete, winner, err := db.CheckGameComplete(gameID)
@@ -855,6 +875,9 @@ func handlePlay(db *DB) {
 					continue
 				}
 
+				// Clear terminal and refresh display after attack
+				clearTerminal()
+				
 				// Display result
 				if result == "hit" {
 					fmt.Printf("🎯 HIT! You hit a ship at %s\n", coordinate)
@@ -866,7 +889,7 @@ func handlePlay(db *DB) {
 				}
 
 				// Show updated board
-				fmt.Println("\nYour current view:")
+				fmt.Printf("\nCurrent game state:\n")
 				displayPlayerBoard(db, player)
 				break
 			}
@@ -913,7 +936,9 @@ func handlePlay(db *DB) {
 
 			// Show updated board if we were attacked
 			if initialBoardHash != currentBoardHash {
-				fmt.Println("\n💥 You were attacked!")
+				clearTerminal()
+				fmt.Println("💥 You were attacked!")
+				fmt.Printf("\nCurrent game state:\n")
 				displayPlayerBoard(db, player)
 			}
 		}

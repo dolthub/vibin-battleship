@@ -585,17 +585,20 @@ func (db *DB) BothPlayersPlacedShips() (bool, error) {
 	// Check if both players have ships on their boards
 	var redShips, blueShips int
 	
-	err := db.conn.QueryRow("SELECT COUNT(*) FROM red_board WHERE content NOT IN (?, ?)", string(HIT_CHAR), string(MISS_CHAR)).Scan(&redShips)
+	// Count positions that contain either ship characters OR hit markers
+	// Hit markers (X) indicate where ships were originally placed
+	err := db.conn.QueryRow("SELECT COUNT(*) FROM red_board WHERE content != ?", string(MISS_CHAR)).Scan(&redShips)
 	if err != nil {
 		return false, fmt.Errorf("failed to count red ships: %w", err)
 	}
 	
-	err = db.conn.QueryRow("SELECT COUNT(*) FROM blue_board WHERE content NOT IN (?, ?)", string(HIT_CHAR), string(MISS_CHAR)).Scan(&blueShips)
+	err = db.conn.QueryRow("SELECT COUNT(*) FROM blue_board WHERE content != ?", string(MISS_CHAR)).Scan(&blueShips)
 	if err != nil {
 		return false, fmt.Errorf("failed to count blue ships: %w", err)
 	}
 	
 	// Both players should have 17 total ship squares (5+4+3+3+2)
+	// This includes both intact ships and hit markers
 	return redShips == 17 && blueShips == 17, nil
 }
 
@@ -603,12 +606,15 @@ func (db *DB) PlayerHasPlacedShips(player string) (bool, error) {
 	tableName := fmt.Sprintf("%s_board", player)
 	var shipCount int
 	
-	query := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE content NOT IN (?, ?)", tableName)
-	err := db.conn.QueryRow(query, string(HIT_CHAR), string(MISS_CHAR)).Scan(&shipCount)
+	// Count positions that contain either ship characters OR hit markers
+	// Hit markers (X) indicate where ships were originally placed
+	query := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE content != ?", tableName)
+	err := db.conn.QueryRow(query, string(MISS_CHAR)).Scan(&shipCount)
 	if err != nil {
 		return false, fmt.Errorf("failed to count %s ships: %w", player, err)
 	}
 	
 	// Player should have 17 total ship squares (5+4+3+3+2)
+	// This includes both intact ships and hit markers
 	return shipCount == 17, nil
 }
