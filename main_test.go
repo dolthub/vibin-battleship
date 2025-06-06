@@ -986,3 +986,51 @@ func TestFullGamePlaythrough(t *testing.T) {
 	
 	t.Fatal("Game should have completed during the attack sequence")
 }
+
+func TestCheckGameCompleteFromDifferentBranch(t *testing.T) {
+	harness := NewTestHarness(t)
+	defer harness.Cleanup()
+
+	// Create a new game
+	newOutput := harness.RunBattleshipCommand(t, "new")
+	gameID := extractGameID(t, newOutput)
+	
+	// Create and switch to game branch for setup
+	err := harness.DB.CreateGameBranch(gameID)
+	require.NoError(t, err, "Failed to create game branch")
+	
+	err = harness.DB.CheckoutBranch(gameID)
+	require.NoError(t, err, "Failed to checkout game branch")
+
+	// Create necessary tables
+	err = harness.DB.CreateTurnTable()
+	require.NoError(t, err, "Failed to create turn table")
+	
+	err = harness.DB.CreateBoardTables()
+	require.NoError(t, err, "Failed to create board tables")
+
+	// Place some ships for both players to create valid board state
+	err = harness.DB.PlaceShip("red", CARRIER_CHAR, "A", 1, true, 5)
+	require.NoError(t, err, "Failed to place red ship")
+	
+	err = harness.DB.PlaceShip("blue", DESTROYER_CHAR, "J", 9, false, 2)
+	require.NoError(t, err, "Failed to place blue ship")
+
+	// Switch to main branch to simulate the error condition
+	err = harness.DB.CheckoutBranch("main")
+	require.NoError(t, err, "Failed to checkout main branch")
+
+	// CheckGameComplete should handle being on wrong branch and still work
+	gameComplete, winner, err := harness.DB.CheckGameComplete(gameID)
+	require.NoError(t, err, "CheckGameComplete should handle branch switching internally")
+	
+	// Game should not be complete since both players have ships
+	assert.False(t, gameComplete, "Game should not be complete with ships remaining")
+	assert.Empty(t, winner, "Winner should be empty when game not complete")
+
+	// Verify we can call it multiple times without issues
+	gameComplete2, winner2, err2 := harness.DB.CheckGameComplete(gameID)
+	require.NoError(t, err2, "Second call to CheckGameComplete should also work")
+	assert.Equal(t, gameComplete, gameComplete2, "Results should be consistent")
+	assert.Equal(t, winner, winner2, "Results should be consistent")
+}

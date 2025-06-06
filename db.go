@@ -479,6 +479,11 @@ func (db *DB) GetShotsAgainst(player string) (map[Coordinate]string, error) {
 }
 
 func (db *DB) CheckGameComplete(gameID string) (bool, string, error) {
+	// Ensure we're on the correct game branch
+	if err := db.CheckoutBranch(gameID); err != nil {
+		return false, "", fmt.Errorf("failed to checkout game branch: %w", err)
+	}
+	
 	// Count remaining ships for each player (not hit)
 	var redShipsRemaining, blueShipsRemaining int
 	
