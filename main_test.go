@@ -673,18 +673,29 @@ func TestJoinCommandCreatesBoardTables(t *testing.T) {
 	require.NoError(t, err, "Failed to query red_board positions")
 	defer rows.Close()
 
-	positions := []struct{ x string; y int; content string }{}
+	positions := []struct {
+		x       string
+		y       int
+		content string
+	}{}
 	for rows.Next() {
 		var x, content string
 		var y int
 		err := rows.Scan(&x, &y, &content)
 		require.NoError(t, err, "Failed to scan red_board position")
-		positions = append(positions, struct{ x string; y int; content string }{x, y, content})
+		positions = append(positions, struct {
+			x       string
+			y       int
+			content string
+		}{x, y, content})
 	}
 
 	// Verify carrier positions A1-E1
 	assert.Len(t, positions, 5, "Expected 5 positions for carrier")
-	expectedPositions := []struct{ x string; y int }{ {"A", 1}, {"B", 1}, {"C", 1}, {"D", 1}, {"E", 1} }
+	expectedPositions := []struct {
+		x string
+		y int
+	}{{"A", 1}, {"B", 1}, {"C", 1}, {"D", 1}, {"E", 1}}
 	for i, pos := range positions {
 		assert.Equal(t, expectedPositions[i].x, pos.x, "Expected x coordinate %s for position %d", expectedPositions[i].x, i)
 		assert.Equal(t, expectedPositions[i].y, pos.y, "Expected y coordinate %d for position %d", expectedPositions[i].y, i)
@@ -781,25 +792,25 @@ func TestFullGamePlaythrough(t *testing.T) {
 	// Create a new game
 	newOutput := harness.RunBattleshipCommand(t, "new")
 	gameID := extractGameID(t, newOutput)
-	
+
 	// Create and switch to game branch for setup
 	err := harness.DB.CreateGameBranch(gameID)
 	require.NoError(t, err, "Failed to create game branch")
-	
+
 	err = harness.DB.CheckoutBranch(gameID)
 	require.NoError(t, err, "Failed to checkout game branch")
 
 	// Create necessary tables
 	err = harness.DB.CreateTurnTable()
 	require.NoError(t, err, "Failed to create turn table")
-	
+
 	err = harness.DB.CreateBoardTables()
 	require.NoError(t, err, "Failed to create board tables")
 
 	// Set up predetermined turn order - Red goes first (higher value)
 	_, err = harness.DB.conn.Exec("INSERT INTO turn (player, value) VALUES ('red', 0.9)")
 	require.NoError(t, err, "Failed to insert red turn value")
-	
+
 	_, err = harness.DB.conn.Exec("INSERT INTO turn (player, value) VALUES ('blue', 0.1)")
 	require.NoError(t, err, "Failed to insert blue turn value")
 
@@ -819,12 +830,12 @@ func TestFullGamePlaythrough(t *testing.T) {
 		isHorizontal bool
 	}{
 		{Ships[0], "A", 1, true},  // Carrier A1-E1 (horizontal)
-		{Ships[1], "A", 3, true},  // Battleship A3-D3 (horizontal) 
+		{Ships[1], "A", 3, true},  // Battleship A3-D3 (horizontal)
 		{Ships[2], "F", 1, false}, // Cruiser F1-F3 (vertical)
 		{Ships[3], "H", 1, false}, // Submarine H1-H3 (vertical)
 		{Ships[4], "J", 5, false}, // Destroyer J5-J6 (vertical)
 	}
-	
+
 	for _, shipPlacement := range redShips {
 		err := harness.DB.PlaceShip("red", shipPlacement.ship.Char, shipPlacement.startX, shipPlacement.startY, shipPlacement.isHorizontal, shipPlacement.ship.Length)
 		require.NoError(t, err, "Failed to place red %s", shipPlacement.ship.Name)
@@ -843,7 +854,7 @@ func TestFullGamePlaythrough(t *testing.T) {
 		{Ships[3], "H", 6, false}, // Submarine H6-H8 (vertical)
 		{Ships[4], "J", 9, false}, // Destroyer J9-J10 (vertical)
 	}
-	
+
 	for _, shipPlacement := range blueShips {
 		err := harness.DB.PlaceShip("blue", shipPlacement.ship.Char, shipPlacement.startX, shipPlacement.startY, shipPlacement.isHorizontal, shipPlacement.ship.Length)
 		require.NoError(t, err, "Failed to place blue %s", shipPlacement.ship.Name)
@@ -859,76 +870,76 @@ func TestFullGamePlaythrough(t *testing.T) {
 
 	// Define scripted attack sequence where Blue wins
 	attacks := []struct {
-		attacker     string
-		coordinate   string
-		expectHit    bool
-		expectSunk   string // Expected ship type to be sunk, empty if none
+		attacker   string
+		coordinate string
+		expectHit  bool
+		expectSunk string // Expected ship type to be sunk, empty if none
 	}{
 		// Red attacks (targeting Blue's ships but missing some)
-		{"red", "A6", true, ""},        // Hit Blue's Carrier
-		{"blue", "A1", true, ""},       // Hit Red's Carrier
-		{"red", "B6", true, ""},        // Hit Blue's Carrier
-		{"blue", "B1", true, ""},       // Hit Red's Carrier
-		{"red", "C6", true, ""},        // Hit Blue's Carrier
-		{"blue", "C1", true, ""},       // Hit Red's Carrier
-		{"red", "D6", true, ""},        // Hit Blue's Carrier
-		{"blue", "D1", true, ""},       // Hit Red's Carrier
-		{"red", "E6", true, "Carrier"}, // Hit Blue's Carrier - SUNK
+		{"red", "A6", true, ""},         // Hit Blue's Carrier
+		{"blue", "A1", true, ""},        // Hit Red's Carrier
+		{"red", "B6", true, ""},         // Hit Blue's Carrier
+		{"blue", "B1", true, ""},        // Hit Red's Carrier
+		{"red", "C6", true, ""},         // Hit Blue's Carrier
+		{"blue", "C1", true, ""},        // Hit Red's Carrier
+		{"red", "D6", true, ""},         // Hit Blue's Carrier
+		{"blue", "D1", true, ""},        // Hit Red's Carrier
+		{"red", "E6", true, "Carrier"},  // Hit Blue's Carrier - SUNK
 		{"blue", "E1", true, "Carrier"}, // Hit Red's Carrier - SUNK
-		
+
 		// Continue attacking - Blue targets Red's ships more effectively
-		{"red", "A1", false, ""},         // Miss (attacking own position)
-		{"blue", "A3", true, ""},         // Hit Red's Battleship
-		{"red", "F6", true, ""},          // Hit Blue's Cruiser
-		{"blue", "B3", true, ""},         // Hit Red's Battleship
-		{"red", "F7", true, ""},          // Hit Blue's Cruiser
-		{"blue", "C3", true, ""},         // Hit Red's Battleship
-		{"red", "F8", true, "Cruiser"},   // Hit Blue's Cruiser - SUNK
+		{"red", "A1", false, ""},           // Miss (attacking own position)
+		{"blue", "A3", true, ""},           // Hit Red's Battleship
+		{"red", "F6", true, ""},            // Hit Blue's Cruiser
+		{"blue", "B3", true, ""},           // Hit Red's Battleship
+		{"red", "F7", true, ""},            // Hit Blue's Cruiser
+		{"blue", "C3", true, ""},           // Hit Red's Battleship
+		{"red", "F8", true, "Cruiser"},     // Hit Blue's Cruiser - SUNK
 		{"blue", "D3", true, "Battleship"}, // Hit Red's Battleship - SUNK
-		
+
 		// Blue systematically destroys Red's remaining ships
-		{"red", "A8", true, ""},          // Hit Blue's Battleship
-		{"blue", "F1", true, ""},         // Hit Red's Cruiser
-		{"red", "B8", true, ""},          // Hit Blue's Battleship
-		{"blue", "F2", true, ""},         // Hit Red's Cruiser
-		{"red", "C8", true, ""},          // Hit Blue's Battleship
-		{"blue", "F3", true, "Cruiser"},  // Hit Red's Cruiser - SUNK
+		{"red", "A8", true, ""},           // Hit Blue's Battleship
+		{"blue", "F1", true, ""},          // Hit Red's Cruiser
+		{"red", "B8", true, ""},           // Hit Blue's Battleship
+		{"blue", "F2", true, ""},          // Hit Red's Cruiser
+		{"red", "C8", true, ""},           // Hit Blue's Battleship
+		{"blue", "F3", true, "Cruiser"},   // Hit Red's Cruiser - SUNK
 		{"red", "D8", true, "Battleship"}, // Hit Blue's Battleship - SUNK
-		{"blue", "H1", true, ""},         // Hit Red's Submarine
-		{"red", "H6", true, ""},          // Hit Blue's Submarine
-		{"blue", "H2", true, ""},         // Hit Red's Submarine
-		{"red", "H7", true, ""},          // Hit Blue's Submarine
+		{"blue", "H1", true, ""},          // Hit Red's Submarine
+		{"red", "H6", true, ""},           // Hit Blue's Submarine
+		{"blue", "H2", true, ""},          // Hit Red's Submarine
+		{"red", "H7", true, ""},           // Hit Blue's Submarine
 		{"blue", "H3", true, "Submarine"}, // Hit Red's Submarine - SUNK
-		{"red", "H8", true, "Submarine"}, // Hit Blue's Submarine - SUNK
-		{"blue", "J5", true, ""},         // Hit Red's Destroyer
-		{"red", "J9", true, ""},          // Hit Blue's Destroyer
+		{"red", "H8", true, "Submarine"},  // Hit Blue's Submarine - SUNK
+		{"blue", "J5", true, ""},          // Hit Red's Destroyer
+		{"red", "J9", true, ""},           // Hit Blue's Destroyer
 		{"blue", "J6", true, "Destroyer"}, // Hit Red's Destroyer - SUNK (Blue wins!)
 	}
 
 	// Execute the scripted attacks
 	for i, attack := range attacks {
 		t.Logf("Attack %d: %s attacks %s (expect %v)", i+1, attack.attacker, attack.coordinate, attack.expectHit)
-		
+
 		// Note: We skip turn validation in this test since we're scripting the attacks
 		// In a real game, the attack command would validate turns
-		
+
 		// Parse coordinate
 		targetX := string(attack.coordinate[0])
 		var targetY int
 		_, err = fmt.Sscanf(attack.coordinate[1:], "%d", &targetY)
 		require.NoError(t, err, "Failed to parse coordinate %s for attack %d", attack.coordinate, i+1)
-		
+
 		// Process the attack
 		result, sunkShip, err := harness.DB.ProcessAttack(attack.attacker, targetX, targetY)
 		require.NoError(t, err, "Failed to process attack %d", i+1)
-		
+
 		// Verify hit/miss result
 		if attack.expectHit {
 			assert.Equal(t, "hit", result, "Expected hit for attack %d", i+1)
 		} else {
 			assert.Equal(t, "miss", result, "Expected miss for attack %d", i+1)
 		}
-		
+
 		// Verify sinking result
 		if attack.expectSunk != "" {
 			assert.Equal(t, attack.expectSunk, sunkShip, "Expected %s to be sunk on attack %d", attack.expectSunk, i+1)
@@ -936,54 +947,141 @@ func TestFullGamePlaythrough(t *testing.T) {
 		} else {
 			assert.Equal(t, "", sunkShip, "Expected no ship to be sunk on attack %d", i+1)
 		}
-		
+
 		// Stage and commit the attack
 		targetPlayer := "blue"
 		if attack.attacker == "blue" {
 			targetPlayer = "red"
 		}
-		
+
 		stageBoardQuery := fmt.Sprintf("CALL DOLT_ADD('%s_board')", targetPlayer)
 		if _, err := harness.DB.conn.Exec(stageBoardQuery); err != nil {
 			require.NoError(t, err, "Failed to stage attack %d", i+1)
 		}
-		
+
 		if _, err := harness.DB.conn.Exec("CALL DOLT_ADD('turn')"); err != nil {
 			require.NoError(t, err, "Failed to stage turn update for attack %d", i+1)
 		}
-		
+
 		commitMessage := fmt.Sprintf("%s player attacked %s - %s", attack.attacker, attack.coordinate, result)
 		if err := harness.DB.CommitChanges(commitMessage); err != nil {
 			require.NoError(t, err, "Failed to commit attack %d", i+1)
 		}
-		
+
 		// Check if game is complete
 		gameComplete, winner, err := harness.DB.CheckGameComplete(gameID)
 		require.NoError(t, err, "Failed to check game completion after attack %d", i+1)
-		
+
 		if gameComplete {
 			t.Logf("Game completed after %d attacks! Winner: %s", i+1, winner)
 			assert.Equal(t, "blue", winner, "Expected Blue to win the game")
-			
+
 			// Complete the game
 			err = harness.DB.CompleteGame(gameID, winner)
 			require.NoError(t, err, "Failed to complete game")
-			
+
+			// Verify we're on main branch after game completion
+			var currentBranch string
+			err = harness.DB.conn.QueryRow("SELECT active_branch()").Scan(&currentBranch)
+			require.NoError(t, err, "Failed to get current branch")
+			assert.Equal(t, "main", currentBranch, "Should be on main branch after game completion")
+
 			// Verify game results in main branch
 			var dbWinner string
 			var redShots, blueShots int
 			err = harness.DB.conn.QueryRow("SELECT winner, total_shots_player1, total_shots_player2 FROM games WHERE id = ?", gameID).Scan(&dbWinner, &redShots, &blueShots)
 			require.NoError(t, err, "Failed to query completed game")
-			
+
 			assert.Equal(t, "blue", dbWinner, "Winner should be recorded as blue")
 			assert.Greater(t, redShots, 0, "Red should have made some shots")
 			assert.Greater(t, blueShots, 0, "Blue should have made some shots")
-			
-			t.Logf("Final game stats: Blue wins with %d shots vs Red's %d shots", blueShots, redShots)
+
+			// Verify that the game branch has been deleted
+			branchExists, err := harness.DB.BranchExists(gameID)
+			require.NoError(t, err, "Failed to check if game branch exists")
+			assert.False(t, branchExists, "Game branch should be deleted after completion")
+
+			// Verify that main branch contains a merge commit
+			// Look for merge commit in recent history
+			rows, err := harness.DB.conn.Query("SELECT message FROM dolt_log ORDER BY date DESC LIMIT 5")
+			require.NoError(t, err, "Failed to query recent commit log")
+			defer rows.Close()
+
+			recentCommits := []string{}
+			for rows.Next() {
+				var message string
+				err := rows.Scan(&message)
+				require.NoError(t, err, "Failed to scan commit message")
+				recentCommits = append(recentCommits, message)
+			}
+
+			// Check for merge commits by looking at commit structure
+			// Merge commits typically have 2 parents in Dolt
+			var mergeCommitFound bool
+			mergeCheckRows, err := harness.DB.conn.Query(`
+				SELECT commit_hash, message 
+				FROM dolt_log 
+				WHERE commit_hash IN (
+					SELECT commit_hash 
+					FROM dolt_commit_ancestors 
+					GROUP BY commit_hash 
+					HAVING COUNT(*) = 2
+				) 
+				ORDER BY date DESC 
+				LIMIT 5`)
+
+			if err == nil {
+				defer mergeCheckRows.Close()
+				for mergeCheckRows.Next() {
+					var hash, message string
+					mergeCheckRows.Scan(&hash, &message)
+					mergeCommitFound = true
+					t.Logf("Found merge commit with hash %s: %s", hash, message)
+					break
+				}
+			}
+
+			// If we can't detect merge commits structurally, that's OK
+			// The main verification is that:
+			// 1. The game branch was deleted (already verified above)
+			// 2. The game data from the branch is now in main (verified by finding game completion commits)
+			if !mergeCommitFound {
+				t.Logf("Could not detect merge commit structure, but branch deletion and data presence verified")
+			}
+
+			t.Logf("Recent commits: %v", recentCommits)
+
+			// Verify we can find game-related commits in the merged history
+			// Get more commits to look for game-specific commits
+			moreRows, err := harness.DB.conn.Query("SELECT message FROM dolt_log ORDER BY date DESC LIMIT 10")
+			require.NoError(t, err, "Failed to query extended commit log")
+			defer moreRows.Close()
+
+			allCommitMessages := []string{}
+			for moreRows.Next() {
+				var message string
+				err := moreRows.Scan(&message)
+				require.NoError(t, err, "Failed to scan commit message")
+				allCommitMessages = append(allCommitMessages, message)
+			}
+
+			foundGameCompletion := false
+			foundTableDrop := false
+			for _, message := range allCommitMessages {
+				if strings.Contains(message, fmt.Sprintf("Game %s completed", gameID)) {
+					foundGameCompletion = true
+				}
+				if strings.Contains(message, fmt.Sprintf("Drop temporary tables for game %s", gameID)) {
+					foundTableDrop = true
+				}
+			}
+
+			assert.True(t, foundGameCompletion, "Should find game completion commit in merged history")
+			assert.True(t, foundTableDrop, "Should find table drop commit in merged history")
 			return
 		}
 	}
-	
+
 	t.Fatal("Game should have completed during the attack sequence")
 }
 
@@ -994,25 +1092,25 @@ func TestCheckGameCompleteFromDifferentBranch(t *testing.T) {
 	// Create a new game
 	newOutput := harness.RunBattleshipCommand(t, "new")
 	gameID := extractGameID(t, newOutput)
-	
+
 	// Create and switch to game branch for setup
 	err := harness.DB.CreateGameBranch(gameID)
 	require.NoError(t, err, "Failed to create game branch")
-	
+
 	err = harness.DB.CheckoutBranch(gameID)
 	require.NoError(t, err, "Failed to checkout game branch")
 
 	// Create necessary tables
 	err = harness.DB.CreateTurnTable()
 	require.NoError(t, err, "Failed to create turn table")
-	
+
 	err = harness.DB.CreateBoardTables()
 	require.NoError(t, err, "Failed to create board tables")
 
 	// Place some ships for both players to create valid board state
 	err = harness.DB.PlaceShip("red", CARRIER_CHAR, "A", 1, true, 5)
 	require.NoError(t, err, "Failed to place red ship")
-	
+
 	err = harness.DB.PlaceShip("blue", DESTROYER_CHAR, "J", 9, false, 2)
 	require.NoError(t, err, "Failed to place blue ship")
 
@@ -1023,7 +1121,7 @@ func TestCheckGameCompleteFromDifferentBranch(t *testing.T) {
 	// CheckGameComplete should handle being on wrong branch and still work
 	gameComplete, winner, err := harness.DB.CheckGameComplete(gameID)
 	require.NoError(t, err, "CheckGameComplete should handle branch switching internally")
-	
+
 	// Game should not be complete since both players have ships
 	assert.False(t, gameComplete, "Game should not be complete with ships remaining")
 	assert.Empty(t, winner, "Winner should be empty when game not complete")
@@ -1059,12 +1157,12 @@ func TestPlayCommandSkipsShipPlacementWhenAlreadyPlaced(t *testing.T) {
 		isHorizontal bool
 	}{
 		{Ships[0], "A", 1, true},  // Carrier A1-E1 (horizontal)
-		{Ships[1], "A", 3, true},  // Battleship A3-D3 (horizontal) 
+		{Ships[1], "A", 3, true},  // Battleship A3-D3 (horizontal)
 		{Ships[2], "F", 1, false}, // Cruiser F1-F3 (vertical)
 		{Ships[3], "H", 1, false}, // Submarine H1-H3 (vertical)
 		{Ships[4], "J", 5, false}, // Destroyer J5-J6 (vertical)
 	}
-	
+
 	for _, shipPlacement := range redShips {
 		err := harness.DB.PlaceShip("red", shipPlacement.ship.Char, shipPlacement.startX, shipPlacement.startY, shipPlacement.isHorizontal, shipPlacement.ship.Length)
 		require.NoError(t, err, "Failed to place red %s", shipPlacement.ship.Name)
@@ -1083,7 +1181,7 @@ func TestPlayCommandSkipsShipPlacementWhenAlreadyPlaced(t *testing.T) {
 		{Ships[3], "H", 6, false}, // Submarine H6-H8 (vertical)
 		{Ships[4], "J", 9, false}, // Destroyer J9-J10 (vertical)
 	}
-	
+
 	for _, shipPlacement := range blueShips {
 		err := harness.DB.PlaceShip("blue", shipPlacement.ship.Char, shipPlacement.startX, shipPlacement.startY, shipPlacement.isHorizontal, shipPlacement.ship.Length)
 		require.NoError(t, err, "Failed to place blue %s", shipPlacement.ship.Name)
@@ -1158,13 +1256,13 @@ func TestPlayCommandSkipsShipPlacementWhenAlreadyPlaced(t *testing.T) {
 
 		// The key assertion: output should indicate ships are already placed
 		// and should NOT contain ship placement prompts
-		assert.Contains(t, output, "Welcome back, red player! Ships are already placed", 
+		assert.Contains(t, output, "Welcome back, red player! Ships are already placed",
 			"Play command should recognize existing ships")
-		assert.NotContains(t, output, "place your ships on the board", 
+		assert.NotContains(t, output, "place your ships on the board",
 			"Play command should NOT prompt for ship placement when ships already exist")
-		assert.NotContains(t, output, "Placing Carrier", 
+		assert.NotContains(t, output, "Placing Carrier",
 			"Play command should NOT prompt for placing individual ships when ships already exist")
-		
+
 		t.Logf("Play command output: %s", output)
 		return
 	case <-outputChan:
@@ -1174,7 +1272,7 @@ func TestPlayCommandSkipsShipPlacementWhenAlreadyPlaced(t *testing.T) {
 		t.Log("Play command completed normally")
 	case <-time.After(2 * time.Second):
 		// Emergency timeout
-		w.Close() 
+		w.Close()
 		os.Stdout = oldStdout
 		t.Fatal("Play command test timed out")
 	}

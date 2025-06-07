@@ -527,12 +527,7 @@ func (db *DB) CompleteGame(gameID, winner string) error {
 		return fmt.Errorf("failed to count blue shots: %w", err)
 	}
 	
-	// Switch to main branch to update games table
-	if err := db.CheckoutBranch("main"); err != nil {
-		return fmt.Errorf("failed to checkout main branch: %w", err)
-	}
-	
-	// Update the games table with results
+	// Update the games table with results on the game branch
 	updateQuery := `UPDATE games SET 
 		winner = ?, 
 		total_shots_player1 = ?, 
@@ -544,19 +539,50 @@ func (db *DB) CompleteGame(gameID, winner string) error {
 		return fmt.Errorf("failed to update games table: %w", err)
 	}
 	
-	// Stage and commit the game completion
+	// Stage and commit the game completion on game branch
 	if _, err := db.conn.Exec("CALL DOLT_ADD('games')"); err != nil {
 		return fmt.Errorf("failed to stage game completion: %w", err)
 	}
 	
-	commitMessage := fmt.Sprintf("Game %s completed - %s wins (%d vs %d shots)", gameID, winner, redShots, blueShots)
-	if err := db.CommitChanges(commitMessage); err != nil {
+	gameCompletionMsg := fmt.Sprintf("Game %s completed - %s wins (%d vs %d shots)", gameID, winner, redShots, blueShots)
+	if err := db.CommitChanges(gameCompletionMsg); err != nil {
 		return fmt.Errorf("failed to commit game completion: %w", err)
 	}
 	
-	// Merge the game branch into main
-	if err := db.MergeBranch(gameID, "main"); err != nil {
-		return fmt.Errorf("failed to merge game branch: %w", err)
+	// Drop temporary tables before merging to main
+	tables := []string{"turn", "red_board", "blue_board"}
+	for _, table := range tables {
+		dropQuery := fmt.Sprintf("DROP TABLE IF EXISTS %s", table)
+		if _, err := db.conn.Exec(dropQuery); err != nil {
+			return fmt.Errorf("failed to drop table %s: %w", table, err)
+		}
+	}
+	
+	// Stage and commit the table drops
+	if _, err := db.conn.Exec("CALL DOLT_ADD('.')"); err != nil {
+		return fmt.Errorf("failed to stage table drops: %w", err)
+	}
+	
+	dropCommitMsg := fmt.Sprintf("Drop temporary tables for game %s", gameID)
+	if err := db.CommitChanges(dropCommitMsg); err != nil {
+		return fmt.Errorf("failed to commit table drops: %w", err)
+	}
+
+	// Switch to main branch to perform merge
+	if err := db.CheckoutBranch("main"); err != nil {
+		return fmt.Errorf("failed to checkout main branch: %w", err)
+	}
+	
+	// Merge the game branch into main using DOLT_MERGE
+	mergeQuery := fmt.Sprintf("CALL DOLT_MERGE('%s')", gameID)
+	if _, err := db.conn.Exec(mergeQuery); err != nil {
+		return fmt.Errorf("failed to merge game branch %s into main: %w", gameID, err)
+	}
+	
+	// Delete the game branch after successful merge
+	deleteBranchQuery := fmt.Sprintf("CALL DOLT_BRANCH('-d', '%s')", gameID)
+	if _, err := db.conn.Exec(deleteBranchQuery); err != nil {
+		return fmt.Errorf("failed to delete game branch %s: %w", gameID, err)
 	}
 	
 	return nil
