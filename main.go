@@ -721,7 +721,21 @@ func handlePlay(db *DB) {
 		displayPlayerBoard(db, player)
 	}
 
-	// Wait for both players to place ships
+	// First wait for both players to join
+	fmt.Println("Waiting for opponent to join...")
+	for {
+		bothJoined, err := db.BothPlayersJoined()
+		if err != nil {
+			fmt.Printf("Failed to check if both players joined: %v\n", err)
+			return
+		}
+		if bothJoined {
+			break
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
+	
+	// Then wait for both players to place ships
 	fmt.Println("Waiting for opponent to place ships...")
 	for {
 		bothPlaced, err := db.BothPlayersPlacedShips()
