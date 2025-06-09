@@ -27,11 +27,10 @@ git checkout claude
 
 ### 3. Build the Game
 
-From the project root, build the battleship binary:
+From the source root, build the battleship binary:
 
 ```bash
-cd src
-go build -o ../bin/battleship .
+go install .
 ```
 
 ### 4. Start Dolt SQL Server
@@ -39,6 +38,7 @@ go build -o ../bin/battleship .
 Navigate to the `db` directory and start the Dolt SQL server:
 
 ```bash
+mkdir db
 cd db
 dolt sql-server
 ```
@@ -50,7 +50,7 @@ The server will start on `127.0.0.1:3306` by default.
 ### 1. Create a New Game
 
 ```bash
-./bin/battleship new
+battleship new
 ```
 
 This will output a game ID that players can use to join.
@@ -60,8 +60,8 @@ This will output a game ID that players can use to join.
 Each player joins using the game ID and chooses red or blue:
 
 ```bash
-./bin/battleship join <game_id> red
-./bin/battleship join <game_id> blue
+battleship join <game_id> red
+battleship join <game_id> blue
 ```
 
 Players will be prompted to place their 5 ships:
@@ -76,31 +76,32 @@ Players will be prompted to place their 5 ships:
 Start the interactive game session:
 
 ```bash
-./bin/battleship play <game_id> red
+battleship play <game_id> red
 # In another terminal:
-./bin/battleship play <game_id> blue
+battleship play <game_id> blue
 ```
 
 Players take turns attacking coordinates (e.g., A5, J10) until one player sinks all of the opponent's ships.
 
 ## Additional Commands
+The following commands are primarily for debugging and inspection.
 
 ### Print Current Board State
 
 ```bash
-./bin/battleship print <game_id> <red|blue>
+battleship print <game_id> <red|blue>
 ```
 
 ### Attack a Specific Coordinate
 
 ```bash
-./bin/battleship attack <game_id> <red|blue> <coordinate>
+battleship attack <game_id> <red|blue> <coordinate>
 ```
 
 ### List All Games
 
 ```bash
-./bin/battleship list
+battleship list
 ```
 
 ## How It Works
@@ -128,7 +129,6 @@ This approach provides complete game isolation and a full audit trail of every m
 ### Running Tests
 
 ```bash
-cd src
 go test -v
 ```
 
