@@ -511,6 +511,45 @@ func (db *DB) CheckGameComplete(gameID string) (bool, string, error) {
 	return false, "", nil // Game continues
 }
 
+func (db *DB) CheckGameCompleteFromMain(gameID string) (bool, string, error) {
+	// Check the games table in main branch to see if game has been completed
+	// Save current branch
+	var currentBranch string
+	err := db.conn.QueryRow("SELECT active_branch()").Scan(&currentBranch)
+	if err != nil {
+		return false, "", fmt.Errorf("failed to get current branch: %w", err)
+	}
+	
+	// Switch to main branch to check games table
+	if err := db.CheckoutBranch("main"); err != nil {
+		return false, "", fmt.Errorf("failed to checkout main branch: %w", err)
+	}
+	
+	// Check if game has a winner recorded
+	var winner string
+	err = db.conn.QueryRow("SELECT winner FROM games WHERE id = ?", gameID).Scan(&winner)
+	if err != nil {
+		// Restore original branch before returning error
+		db.CheckoutBranch(currentBranch)
+		if err.Error() == "sql: no rows in result set" {
+			return false, "", fmt.Errorf("game %s not found", gameID)
+		}
+		return false, "", fmt.Errorf("failed to check game completion: %w", err)
+	}
+	
+	// Restore original branch
+	if err := db.CheckoutBranch(currentBranch); err != nil {
+		return false, "", fmt.Errorf("failed to restore branch %s: %w", currentBranch, err)
+	}
+	
+	// Game is complete if winner is not empty
+	if winner != "" {
+		return true, winner, nil
+	}
+	
+	return false, "", nil
+}
+
 func (db *DB) CompleteGame(gameID, winner string) error {
 	// Count total shots made by each player
 	var redShots, blueShots int

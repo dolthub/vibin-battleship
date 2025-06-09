@@ -915,12 +915,28 @@ func handlePlay(db *DB) {
 			// Get initial table hashes
 			initialTurnHash, err := db.GetTableHash("turn")
 			if err != nil {
+				// Table might have been dropped due to game completion
+				// Check if game has ended before reporting error
+				gameComplete, winner, checkErr := db.CheckGameCompleteFromMain(gameID)
+				if checkErr == nil && gameComplete {
+					fmt.Printf("\n🎉 GAME OVER! %s player wins!\n", strings.ToUpper(winner[:1])+winner[1:])
+					fmt.Println("Game results have been saved.")
+					return
+				}
 				fmt.Printf("Failed to get turn table hash: %v\n", err)
 				return
 			}
 			
 			initialBoardHash, err := db.GetTableHash(fmt.Sprintf("%s_board", player))
 			if err != nil {
+				// Table might have been dropped due to game completion
+				// Check if game has ended before reporting error
+				gameComplete, winner, checkErr := db.CheckGameCompleteFromMain(gameID)
+				if checkErr == nil && gameComplete {
+					fmt.Printf("\n🎉 GAME OVER! %s player wins!\n", strings.ToUpper(winner[:1])+winner[1:])
+					fmt.Println("Game results have been saved.")
+					return
+				}
 				fmt.Printf("Failed to get board table hash: %v\n", err)
 				return
 			}
@@ -932,12 +948,28 @@ func handlePlay(db *DB) {
 				
 				currentTurnHash, err := db.GetTableHash("turn")
 				if err != nil {
+					// Table might have been dropped due to game completion
+					// Check if game has ended before reporting error
+					gameComplete, winner, checkErr := db.CheckGameCompleteFromMain(gameID)
+					if checkErr == nil && gameComplete {
+						fmt.Printf("\n🎉 GAME OVER! %s player wins!\n", strings.ToUpper(winner[:1])+winner[1:])
+						fmt.Println("Game results have been saved.")
+						return
+					}
 					fmt.Printf("Failed to get current turn table hash: %v\n", err)
 					return
 				}
 				
 				currentBoardHash, err = db.GetTableHash(fmt.Sprintf("%s_board", player))
 				if err != nil {
+					// Table might have been dropped due to game completion
+					// Check if game has ended before reporting error
+					gameComplete, winner, checkErr := db.CheckGameCompleteFromMain(gameID)
+					if checkErr == nil && gameComplete {
+						fmt.Printf("\n🎉 GAME OVER! %s player wins!\n", strings.ToUpper(winner[:1])+winner[1:])
+						fmt.Println("Game results have been saved.")
+						return
+					}
 					fmt.Printf("Failed to get current board table hash: %v\n", err)
 					return
 				}
