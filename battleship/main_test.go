@@ -180,7 +180,7 @@ func TestNewCommandCreatesTable(t *testing.T) {
 		require.NoError(t, err, "Failed to scan column info")
 	}
 
-	assert.Equal(t, 8, columnCount, "Expected 8 columns in games table")
+	assert.Equal(t, 10, columnCount, "Expected 10 columns in games table")
 }
 
 func TestNewCommandGeneratesGameID(t *testing.T) {
@@ -989,7 +989,7 @@ func TestFullGamePlaythrough(t *testing.T) {
 			// Verify game results in main branch
 			var dbWinner string
 			var redShots, blueShots int
-			err = harness.DB.conn.QueryRow("SELECT winner, total_shots_player1, total_shots_player2 FROM games WHERE id = ?", gameID).Scan(&dbWinner, &redShots, &blueShots)
+			err = harness.DB.conn.QueryRow("SELECT winner, total_shots_red, total_shots_blue FROM games WHERE id = ?", gameID).Scan(&dbWinner, &redShots, &blueShots)
 			require.NoError(t, err, "Failed to query completed game")
 
 			assert.Equal(t, "blue", dbWinner, "Winner should be recorded as blue")

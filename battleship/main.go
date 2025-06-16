@@ -125,8 +125,8 @@ func handleNewGame(db *DB) {
 	gameID := uuid.New().String()
 
 	// Insert initial game row into games table
-	query := `INSERT INTO games (id, player1_name, player2_name, winner, total_shots_player1, total_shots_player2, game_duration_minutes) 
-			  VALUES (?, '', '', '', 0, 0, 0)`
+	query := `INSERT INTO games (id, red_player, blue_player, winner, total_shots_red, total_shots_blue, total_hits_red, total_hits_blue, game_duration_seconds) 
+			  VALUES (?, '', '', '', 0, 0, 0, 0, 0)`
 	_, err := db.conn.Exec(query, gameID)
 	if err != nil {
 		fmt.Printf("Failed to create game: %v\n", err)

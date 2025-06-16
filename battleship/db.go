@@ -33,12 +33,14 @@ func (db *DB) Close() error {
 func (db *DB) CreateGamesTable() error {
 	query := `CREATE TABLE IF NOT EXISTS games (
 		id VARCHAR(36) PRIMARY KEY,
-		player1_name VARCHAR(100) NOT NULL,
-		player2_name VARCHAR(100) NOT NULL,
+		red_player VARCHAR(100) NOT NULL,
+		blue_player VARCHAR(100) NOT NULL,
 		winner VARCHAR(100) NOT NULL,
-		total_shots_player1 INT NOT NULL,
-		total_shots_player2 INT NOT NULL,
-		game_duration_minutes INT,
+		total_shots_red INT NOT NULL,
+		total_shots_blue INT NOT NULL,
+		total_hits_red INT NOT NULL,
+		total_hits_blue INT NOT NULL,
+		game_duration_seconds INT,
 		completed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	)`
 
@@ -566,14 +568,31 @@ func (db *DB) CompleteGame(gameID, winner string) error {
 		return fmt.Errorf("failed to count blue shots: %w", err)
 	}
 	
+	// Count hits made by each player
+	var redHits, blueHits int
+	
+	// Red's hits are HIT_CHAR marks on blue's board
+	err = db.conn.QueryRow("SELECT COUNT(*) FROM blue_board WHERE content = ?", string(HIT_CHAR)).Scan(&redHits)
+	if err != nil {
+		return fmt.Errorf("failed to count red hits: %w", err)
+	}
+	
+	// Blue's hits are HIT_CHAR marks on red's board
+	err = db.conn.QueryRow("SELECT COUNT(*) FROM red_board WHERE content = ?", string(HIT_CHAR)).Scan(&blueHits)
+	if err != nil {
+		return fmt.Errorf("failed to count blue hits: %w", err)
+	}
+	
 	// Update the games table with results on the game branch
 	updateQuery := `UPDATE games SET 
 		winner = ?, 
-		total_shots_player1 = ?, 
-		total_shots_player2 = ?, 
-		game_duration_minutes = 0
+		total_shots_red = ?, 
+		total_shots_blue = ?, 
+		total_hits_red = ?,
+		total_hits_blue = ?,
+		game_duration_seconds = 0
 		WHERE id = ?`
-	_, err = db.conn.Exec(updateQuery, winner, redShots, blueShots, gameID)
+	_, err = db.conn.Exec(updateQuery, winner, redShots, blueShots, redHits, blueHits, gameID)
 	if err != nil {
 		return fmt.Errorf("failed to update games table: %w", err)
 	}
@@ -583,7 +602,7 @@ func (db *DB) CompleteGame(gameID, winner string) error {
 		return fmt.Errorf("failed to stage game completion: %w", err)
 	}
 	
-	gameCompletionMsg := fmt.Sprintf("Game %s completed - %s wins (%d vs %d shots)", gameID, winner, redShots, blueShots)
+	gameCompletionMsg := fmt.Sprintf("Game %s completed - %s wins (%d/%d vs %d/%d shots/hits)", gameID, winner, redShots, redHits, blueShots, blueHits)
 	if err := db.CommitChanges(gameCompletionMsg); err != nil {
 		return fmt.Errorf("failed to commit game completion: %w", err)
 	}
