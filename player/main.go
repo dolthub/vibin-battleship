@@ -9,7 +9,6 @@ import (
 	"regexp"
 	"strings"
 	"sync"
-	"time"
 )
 
 type Player struct {
@@ -19,29 +18,6 @@ type Player struct {
 	Strategy PlayerStrategy
 }
 
-type PlayerStrategy interface {
-	GetNextMove(gameState string) string
-	PlaceShips() []string
-}
-
-type RandomStrategy struct{}
-
-func (r *RandomStrategy) GetNextMove(gameState string) string {
-	// Simple random strategy - just pick coordinates A1-J10
-	rows := "ABCDEFGHIJ"
-	cols := "12345678910"
-	
-	// For now, just return a random coordinate
-	// In a real implementation, we'd parse the game state and avoid already hit positions
-	row := string(rows[time.Now().UnixNano()%10])
-	col := string(cols[time.Now().UnixNano()%10])
-	return row + col
-}
-
-func (r *RandomStrategy) PlaceShips() []string {
-	// For now, return empty - the battleship game handles ship placement automatically
-	return []string{}
-}
 
 func main() {
 	fmt.Println("Starting Battleship Game Orchestrator...")
@@ -157,20 +133,55 @@ func handlePlayerIO(player *Player, stdin io.WriteCloser, stdout, stderr io.Read
 	
 	scanner := bufio.NewScanner(stdout)
 	gameState := ""
+	shipPlacements := player.Strategy.PlaceShips()
+	shipIndex := 0
 	
 	for scanner.Scan() {
 		line := scanner.Text()
 		fmt.Printf("[%s] %s\n", player.Name, line)
 		gameState += line + "\n"
 		
-		// Check if we need to make a move
-		if strings.Contains(line, "Enter coordinate to attack") {
+		// Handle ship placement
+		if strings.Contains(line, "Enter starting position") {
+			if shipIndex < len(shipPlacements) {
+				placement := shipPlacements[shipIndex]
+				fmt.Printf("[%s] Placing ship at: %s\n", player.Name, placement.Position)
+				
+				_, err := stdin.Write([]byte(placement.Position + "\n"))
+				if err != nil {
+					log.Printf("Error writing ship position for %s: %v", player.Name, err)
+					return
+				}
+			}
+		}
+		
+		// Handle orientation
+		if strings.Contains(line, "Place horizontally?") {
+			if shipIndex < len(shipPlacements) {
+				placement := shipPlacements[shipIndex]
+				orientation := "n"
+				if placement.IsHorizontal {
+					orientation = "y"
+				}
+				fmt.Printf("[%s] Orientation: %s\n", player.Name, orientation)
+				
+				_, err := stdin.Write([]byte(orientation + "\n"))
+				if err != nil {
+					log.Printf("Error writing orientation for %s: %v", player.Name, err)
+					return
+				}
+				shipIndex++
+			}
+		}
+		
+		// Check if we need to make an attack move
+		if strings.Contains(line, "Enter attack coordinate") || strings.Contains(line, "Your turn!") {
 			move := player.Strategy.GetNextMove(gameState)
-			fmt.Printf("[%s] Making move: %s\n", player.Name, move)
+			fmt.Printf("[%s] Making attack: %s\n", player.Name, move)
 			
 			_, err := stdin.Write([]byte(move + "\n"))
 			if err != nil {
-				log.Printf("Error writing move for %s: %v", player.Name, err)
+				log.Printf("Error writing attack for %s: %v", player.Name, err)
 				return
 			}
 		}
