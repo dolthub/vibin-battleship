@@ -278,69 +278,85 @@ func handlePlayerIO(player *Player, stdin io.WriteCloser, stdout, stderr io.Read
 		}
 	}()
 
-	scanner := bufio.NewScanner(stdout)
+	reader := bufio.NewReader(stdout)
 	gameState := ""
 	shipPlacements := player.Strategy.PlaceShips()
 	shipIndex := 0
+	shipPlacementComplete := false
+	buffer := ""
 
-	for scanner.Scan() {
-		line := scanner.Text()
-		fmt.Printf("[%s] %s\n", player.Name, line)
-		gameState += line + "\n"
-
-		// Handle ship placement
-		if strings.Contains(line, "Enter starting position") {
-			if shipIndex < len(shipPlacements) {
-				placement := shipPlacements[shipIndex]
-				fmt.Printf("[%s] Placing ship at: %s\n", player.Name, placement.Position)
-
-				_, err := stdin.Write([]byte(placement.Position + "\n"))
-				if err != nil {
-					log.Printf("Error writing ship position for %s: %v", player.Name, err)
-					return
-				}
+	for {
+		// Read with a timeout to detect prompts that don't end with newlines
+		b := make([]byte, 1)
+		n, err := reader.Read(b)
+		if err != nil {
+			if err == io.EOF {
+				break
 			}
-		}
-
-		// Handle orientation
-		if strings.Contains(line, "Place horizontally?") {
-			if shipIndex < len(shipPlacements) {
-				placement := shipPlacements[shipIndex]
-				orientation := "n"
-				if placement.IsHorizontal {
-					orientation = "y"
-				}
-				fmt.Printf("[%s] Orientation: %s\n", player.Name, orientation)
-
-				_, err := stdin.Write([]byte(orientation + "\n"))
-				if err != nil {
-					log.Printf("Error writing orientation for %s: %v", player.Name, err)
-					return
-				}
-				shipIndex++
-			}
-		}
-
-		// Check if we need to make an attack move
-		if strings.Contains(line, "Enter attack coordinate") || strings.Contains(line, "Your turn!") {
-			move := player.Strategy.GetNextMove(gameState)
-			fmt.Printf("[%s] Making attack: %s\n", player.Name, move)
-
-			_, err := stdin.Write([]byte(move + "\n"))
-			if err != nil {
-				log.Printf("Error writing attack for %s: %v", player.Name, err)
-				return
-			}
-		}
-
-		// Check if game is over
-		if strings.Contains(line, "Game Over") || strings.Contains(line, "wins!") {
-			fmt.Printf("[%s] Game ended\n", player.Name)
+			log.Printf("Error reading from %s: %v", player.Name, err)
 			return
 		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		log.Printf("Error reading from %s: %v", player.Name, err)
+		if n > 0 {
+			buffer += string(b[0])
+			
+			// If we see a newline, process the complete line
+			if b[0] == '\n' {
+				line := strings.TrimSpace(buffer)
+				if line != "" {
+					fmt.Printf("[%s] %s\n", player.Name, line)
+					gameState += line + "\n"
+					
+					// Check if ship placement is complete
+					if strings.Contains(line, "player has completed ship placement") || strings.Contains(line, "Both players have placed ships") {
+						shipPlacementComplete = true
+					}
+					
+					// Check if we need to make an attack move
+					if strings.Contains(line, "Enter attack coordinate") || strings.Contains(line, "Your turn!") {
+						shipPlacementComplete = true // We're now in the game phase
+						move := player.Strategy.GetNextMove(gameState)
+						fmt.Printf("[%s] Making attack: %s\n", player.Name, move)
+						stdin.Write([]byte(move + "\n"))
+					}
+					
+					// Only check for game endings during actual gameplay, not ship placement
+					if shipPlacementComplete && (strings.Contains(line, "Game Over") || strings.Contains(line, "wins!")) {
+						fmt.Printf("[%s] Game ended - detected line: '%s'\n", player.Name, line)
+						return
+					}
+					
+					// AI should fail if any ship placement is rejected
+					if strings.Contains(line, "Please try again") {
+						fmt.Printf("[%s] AI placement failed - terminating\n", player.Name)
+						return
+					}
+				}
+				buffer = ""
+			} else if strings.HasSuffix(buffer, ": ") {
+				// This looks like a prompt - handle it
+				line := strings.TrimSpace(buffer)
+				fmt.Printf("[%s] %s\n", player.Name, line)
+				
+				if strings.Contains(line, "Enter starting position") {
+					if shipIndex < len(shipPlacements) {
+						placement := shipPlacements[shipIndex]
+						fmt.Printf("[%s] Placing ship at: %s\n", player.Name, placement.Position)
+						stdin.Write([]byte(placement.Position + "\n"))
+					}
+				} else if strings.Contains(line, "Place horizontally") {
+					if shipIndex < len(shipPlacements) {
+						placement := shipPlacements[shipIndex]
+						orientation := "n"
+						if placement.IsHorizontal {
+							orientation = "y"
+						}
+						fmt.Printf("[%s] Orientation: %s\n", player.Name, orientation)
+						stdin.Write([]byte(orientation + "\n"))
+						shipIndex++
+					}
+				}
+				buffer = ""
+			}
+		}
 	}
 }

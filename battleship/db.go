@@ -486,12 +486,23 @@ func (db *DB) CheckGameComplete(gameID string) (bool, string, error) {
 		return false, "", fmt.Errorf("failed to checkout game branch: %w", err)
 	}
 	
+	// First check if both players have placed ships
+	bothPlaced, err := db.BothPlayersPlacedShips()
+	if err != nil {
+		return false, "", fmt.Errorf("failed to check if both players placed ships: %w", err)
+	}
+	
+	// Game is not complete if both players haven't placed ships yet
+	if !bothPlaced {
+		return false, "", nil
+	}
+	
 	// Count remaining ships for each player (not hit)
 	var redShipsRemaining, blueShipsRemaining int
 	
 	// Count red's remaining ships (ship characters that aren't HIT_CHAR)
 	redQuery := "SELECT COUNT(*) FROM red_board WHERE content NOT IN (' ', ?, ?)"
-	err := db.conn.QueryRow(redQuery, string(HIT_CHAR), string(MISS_CHAR)).Scan(&redShipsRemaining)
+	err = db.conn.QueryRow(redQuery, string(HIT_CHAR), string(MISS_CHAR)).Scan(&redShipsRemaining)
 	if err != nil {
 		return false, "", fmt.Errorf("failed to count red ships: %w", err)
 	}
