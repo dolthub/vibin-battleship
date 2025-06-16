@@ -257,8 +257,9 @@ func handleJoinGame(db *DB) {
 		fmt.Printf("\n%s player joined (ship placement skipped during testing)\n", color)
 	}
 
-	// If this is the second player, determine turn order
+	// Check if both players have joined
 	if playerCount == 2 {
+		// Second player just joined - determine turn order and start game
 		rows, err := db.conn.Query("SELECT player, value FROM turn ORDER BY value DESC")
 		if err != nil {
 			fmt.Printf("Failed to query turn order: %v\n", err)
@@ -293,7 +294,57 @@ func handleJoinGame(db *DB) {
 		fmt.Println("=== GAME STARTED ===")
 		playGameLoop(db, gameID, color)
 	} else {
+		// First player - in testing mode, just exit after showing waiting message
 		fmt.Println("Waiting for the other player to join...")
+		
+		if os.Getenv("BATTLESHIP_TESTING") == "true" {
+			return
+		}
+		
+		// In non-testing mode, wait for second player and then start game
+		// Wait for the second player to join
+		for {
+			var currentPlayerCount int
+			err := db.conn.QueryRow("SELECT COUNT(*) FROM turn").Scan(&currentPlayerCount)
+			if err != nil {
+				fmt.Printf("Error checking for second player: %v\n", err)
+				time.Sleep(2 * time.Second)
+				continue
+			}
+			if currentPlayerCount == 2 {
+				break
+			}
+			time.Sleep(250 * time.Millisecond)
+		}
+		
+		// Both players have now joined
+		fmt.Println("Second player has joined!")
+		
+		// Wait for both players to place ships
+		fmt.Println("Waiting for both players to place ships...")
+		for {
+			bothPlaced, err := db.BothPlayersPlacedShips()
+			if err != nil {
+				time.Sleep(2 * time.Second)
+				continue
+			}
+			if bothPlaced {
+				break
+			}
+			time.Sleep(250 * time.Millisecond)
+		}
+		
+		fmt.Println("Both players have placed ships! Game starting...")
+		
+		// Ensure we're on the correct game branch
+		if err := db.CheckoutBranch(gameID); err != nil {
+			fmt.Printf("Failed to checkout game branch: %v\n", err)
+			return
+		}
+		
+		clearTerminal()
+		fmt.Println("=== GAME STARTED ===")
+		playGameLoop(db, gameID, color)
 	}
 }
 
