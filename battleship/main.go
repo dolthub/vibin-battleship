@@ -726,8 +726,10 @@ func handlePlay(db *DB) {
 	for {
 		bothJoined, err := db.BothPlayersJoined()
 		if err != nil {
-			fmt.Printf("Failed to check if both players joined: %v\n", err)
-			return
+			// Don't terminate on database errors - keep waiting
+			fmt.Printf("Checking player status... (waiting for opponent to join)\n")
+			time.Sleep(2 * time.Second)
+			continue
 		}
 		if bothJoined {
 			break
@@ -740,8 +742,10 @@ func handlePlay(db *DB) {
 	for {
 		bothPlaced, err := db.BothPlayersPlacedShips()
 		if err != nil {
-			fmt.Printf("Failed to check if both players placed ships: %v\n", err)
-			return
+			// Don't terminate on database errors - opponent might not have joined yet
+			fmt.Printf("Checking ship placement status... (waiting for opponent)\n")
+			time.Sleep(2 * time.Second)
+			continue
 		}
 		if bothPlaced {
 			break

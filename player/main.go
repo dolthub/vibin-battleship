@@ -2,13 +2,17 @@ package main
 
 import (
 	"bufio"
+	"context"
+	"flag"
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"os/exec"
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 )
 
 type Player struct {
@@ -18,49 +22,120 @@ type Player struct {
 	Strategy PlayerStrategy
 }
 
-
 func main() {
+	// Parse command line arguments
+	redPlayerType := flag.String("red-player", "random", "Type of red player: random or human")
+	bluePlayerType := flag.String("blue-player", "random", "Type of blue player: random or human")
+	flag.Parse()
+
+	// Validate player types
+	if !isValidPlayerType(*redPlayerType) {
+		fmt.Printf("Invalid red player type: %s. Must be 'random' or 'human'\n", *redPlayerType)
+		os.Exit(1)
+	}
+	if !isValidPlayerType(*bluePlayerType) {
+		fmt.Printf("Invalid blue player type: %s. Must be 'random' or 'human'\n", *bluePlayerType)
+		os.Exit(1)
+	}
+
 	fmt.Println("Starting Battleship Game Orchestrator...")
-	
+	fmt.Printf("Red player: %s, Blue player: %s\n", *redPlayerType, *bluePlayerType)
+
 	// Create a new game
 	gameID, err := createNewGame()
 	if err != nil {
 		log.Fatalf("Failed to create new game: %v", err)
 	}
-	
+
 	fmt.Printf("Created game: %s\n", gameID)
-	
-	// Create two players
+
+	// Create players based on specified types
 	player1 := &Player{
-		Name:     "RandomBot1",
+		Name:     getPlayerName("red", *redPlayerType),
 		Color:    "red",
 		GameID:   gameID,
-		Strategy: &RandomStrategy{},
+		Strategy: createStrategy(*redPlayerType),
 	}
-	
+
 	player2 := &Player{
-		Name:     "RandomBot2", 
+		Name:     getPlayerName("blue", *bluePlayerType),
 		Color:    "blue",
 		GameID:   gameID,
-		Strategy: &RandomStrategy{},
+		Strategy: createStrategy(*bluePlayerType),
+	}
+
+	// Start only AI players in goroutines
+	var wg sync.WaitGroup
+	aiPlayers := []*Player{}
+
+	// Check which players are AI and need to be started
+	if _, isHuman := player1.Strategy.(*HumanStrategy); !isHuman {
+		aiPlayers = append(aiPlayers, player1)
+	} else {
+		fmt.Printf("\n🎮 Human player %s (%s) instructions:\n", player1.Name, player1.Color)
+		fmt.Printf("   Open a new terminal and run:\n")
+		fmt.Printf("   battleship play %s %s\n", gameID, player1.Color)
+	}
+
+	if _, isHuman := player2.Strategy.(*HumanStrategy); !isHuman {
+		aiPlayers = append(aiPlayers, player2)
+	} else {
+		fmt.Printf("🎮 Human player %s (%s) instructions:\n", player2.Name, player2.Color)
+		fmt.Printf("   Open a new terminal and run:\n")
+		fmt.Printf("   battleship play %s %s\n", gameID, player2.Color)
+	}
+
+	// Start AI players
+	if len(aiPlayers) > 0 {
+		wg.Add(len(aiPlayers))
+
+		for _, player := range aiPlayers {
+			go func(p *Player) {
+				defer wg.Done()
+				playAIGame(p)
+			}(player)
+		}
+
+		wg.Wait()
+	}
+
+	// Wait for game completion regardless of player types
+	if len(aiPlayers) == 0 {
+		fmt.Println("📋 Both players are human - no AI players to start.")
+		fmt.Println("   Use the commands above to connect to the game in separate terminals.")
+		fmt.Println("⏳ Waiting for game to complete...")
+	} else {
+		fmt.Printf("🤖 AI players completed!\n")
+		if len(aiPlayers) < 2 {
+			fmt.Println("⏳ Waiting for human player to complete the game...")
+		}
 	}
 	
-	// Start both players in goroutines
-	var wg sync.WaitGroup
-	wg.Add(2)
-	
-	go func() {
-		defer wg.Done()
-		playGame(player1)
-	}()
-	
-	go func() {
-		defer wg.Done()
-		playGame(player2)
-	}()
-	
-	wg.Wait()
-	fmt.Println("Game completed!")
+	// Monitor game completion
+	waitForGameCompletion(gameID)
+}
+
+func isValidPlayerType(playerType string) bool {
+	return playerType == "random" || playerType == "human"
+}
+
+func getPlayerName(color, playerType string) string {
+	if playerType == "human" {
+		return fmt.Sprintf("Human_%s", color)
+	}
+	return fmt.Sprintf("RandomBot_%s", color)
+}
+
+func createStrategy(playerType string) PlayerStrategy {
+	switch playerType {
+	case "random":
+		return &RandomStrategy{}
+	case "human":
+		return &HumanStrategy{}
+	default:
+		log.Fatalf("Unknown player type: %s", playerType)
+		return nil
+	}
 }
 
 func createNewGame() (string, error) {
@@ -69,59 +144,91 @@ func createNewGame() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to create game: %v", err)
 	}
-	
+
 	// Parse game ID from output
 	re := regexp.MustCompile(`New game created with ID: ([a-f0-9-]+)`)
 	matches := re.FindStringSubmatch(string(output))
 	if len(matches) < 2 {
 		return "", fmt.Errorf("could not parse game ID from output: %s", string(output))
 	}
-	
+
 	return matches[1], nil
 }
 
-func playGame(player *Player) {
-	fmt.Printf("Starting player %s (%s) for game %s\n", player.Name, player.Color, player.GameID)
+func waitForGameCompletion(gameID string) {
+	fmt.Printf("🔍 Monitoring game %s for completion...\n", gameID)
 	
+	for {
+		// Try to connect to the game with a timeout
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		cmd := exec.CommandContext(ctx, "battleship", "play", gameID, "red")
+		
+		output, err := cmd.CombinedOutput()
+		cancel()
+		
+		outputStr := string(output)
+		
+		// Check for game completion indicators
+		if strings.Contains(outputStr, "Game Over") || 
+		   strings.Contains(outputStr, "wins!") || 
+		   strings.Contains(outputStr, "completed") {
+			fmt.Printf("🎉 Game %s has completed!\n", gameID)
+			return
+		}
+		
+		// If command timed out, game is probably still active (waiting for input)
+		// If command failed quickly, check if it's due to game completion
+		if err != nil && !strings.Contains(err.Error(), "killed") {
+			// Some other error - might indicate game is complete or invalid
+			fmt.Printf("🔍 Checking game status... (error: %v)\n", err)
+		}
+		
+		// Wait 5 seconds before checking again
+		time.Sleep(5 * time.Second)
+	}
+}
+
+func playAIGame(player *Player) {
+	fmt.Printf("Starting AI player %s (%s) for game %s\n", player.Name, player.Color, player.GameID)
 	// Start the interactive battleship play command
 	cmd := exec.Command("battleship", "play", player.GameID, player.Color)
-	
+
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		log.Printf("Error creating stdin pipe for %s: %v", player.Name, err)
 		return
 	}
-	
+
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		log.Printf("Error creating stdout pipe for %s: %v", player.Name, err)
 		return
 	}
-	
+
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		log.Printf("Error creating stderr pipe for %s: %v", player.Name, err)
 		return
 	}
-	
+
 	if err := cmd.Start(); err != nil {
 		log.Printf("Error starting command for %s: %v", player.Name, err)
 		return
 	}
-	
+
 	// Handle the interactive game
 	go handlePlayerIO(player, stdin, stdout, stderr)
-	
+
 	if err := cmd.Wait(); err != nil {
-		log.Printf("Player %s finished with error: %v", player.Name, err)
+		log.Printf("AI player %s finished with error: %v", player.Name, err)
 	} else {
-		fmt.Printf("Player %s finished successfully\n", player.Name)
+		fmt.Printf("AI player %s finished successfully\n", player.Name)
 	}
 }
 
 func handlePlayerIO(player *Player, stdin io.WriteCloser, stdout, stderr io.ReadCloser) {
 	defer stdin.Close()
-	
+
 	// Read from stdout and stderr
 	go func() {
 		scanner := bufio.NewScanner(stderr)
@@ -130,23 +237,23 @@ func handlePlayerIO(player *Player, stdin io.WriteCloser, stdout, stderr io.Read
 			fmt.Printf("[%s ERROR] %s\n", player.Name, line)
 		}
 	}()
-	
+
 	scanner := bufio.NewScanner(stdout)
 	gameState := ""
 	shipPlacements := player.Strategy.PlaceShips()
 	shipIndex := 0
-	
+
 	for scanner.Scan() {
 		line := scanner.Text()
 		fmt.Printf("[%s] %s\n", player.Name, line)
 		gameState += line + "\n"
-		
+
 		// Handle ship placement
 		if strings.Contains(line, "Enter starting position") {
 			if shipIndex < len(shipPlacements) {
 				placement := shipPlacements[shipIndex]
 				fmt.Printf("[%s] Placing ship at: %s\n", player.Name, placement.Position)
-				
+
 				_, err := stdin.Write([]byte(placement.Position + "\n"))
 				if err != nil {
 					log.Printf("Error writing ship position for %s: %v", player.Name, err)
@@ -154,7 +261,7 @@ func handlePlayerIO(player *Player, stdin io.WriteCloser, stdout, stderr io.Read
 				}
 			}
 		}
-		
+
 		// Handle orientation
 		if strings.Contains(line, "Place horizontally?") {
 			if shipIndex < len(shipPlacements) {
@@ -164,7 +271,7 @@ func handlePlayerIO(player *Player, stdin io.WriteCloser, stdout, stderr io.Read
 					orientation = "y"
 				}
 				fmt.Printf("[%s] Orientation: %s\n", player.Name, orientation)
-				
+
 				_, err := stdin.Write([]byte(orientation + "\n"))
 				if err != nil {
 					log.Printf("Error writing orientation for %s: %v", player.Name, err)
@@ -173,26 +280,26 @@ func handlePlayerIO(player *Player, stdin io.WriteCloser, stdout, stderr io.Read
 				shipIndex++
 			}
 		}
-		
+
 		// Check if we need to make an attack move
 		if strings.Contains(line, "Enter attack coordinate") || strings.Contains(line, "Your turn!") {
 			move := player.Strategy.GetNextMove(gameState)
 			fmt.Printf("[%s] Making attack: %s\n", player.Name, move)
-			
+
 			_, err := stdin.Write([]byte(move + "\n"))
 			if err != nil {
 				log.Printf("Error writing attack for %s: %v", player.Name, err)
 				return
 			}
 		}
-		
+
 		// Check if game is over
 		if strings.Contains(line, "Game Over") || strings.Contains(line, "wins!") {
 			fmt.Printf("[%s] Game ended\n", player.Name)
 			return
 		}
 	}
-	
+
 	if err := scanner.Err(); err != nil {
 		log.Printf("Error reading from %s: %v", player.Name, err)
 	}
