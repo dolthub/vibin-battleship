@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -271,6 +272,30 @@ func handleJoinGame(db *DB) {
 			rows.Scan(&firstPlayer, &firstValue)
 			fmt.Printf("\nBoth players have joined! %s player goes first (value: %.9f)\n", firstPlayer, firstValue)
 		}
+
+		// Continue to game loop - same logic as handlePlay
+		fmt.Println("Waiting for both players to place ships...")
+		for {
+			bothPlaced, err := db.BothPlayersPlacedShips()
+			if err != nil {
+				// Don't terminate on database errors - opponent might not have joined yet
+				fmt.Printf("Checking ship placement status... (waiting for opponent)\n")
+				time.Sleep(2 * time.Second)
+				continue
+			}
+			if bothPlaced {
+				break
+			}
+			time.Sleep(250 * time.Millisecond)
+		}
+
+		fmt.Println("Both players have placed ships! Game starting...")
+
+		// Main game loop - same as handlePlay
+		clearTerminal()
+
+		// Continue with the main game loop from handlePlay
+		playGameLoop(db, gameID, color)
 	} else {
 		fmt.Println("Waiting for the other player to join...")
 	}
@@ -278,7 +303,7 @@ func handleJoinGame(db *DB) {
 
 func placeShipsForPlayer(db *DB, player string) error {
 	fmt.Printf("\nPlacing ships for %s player:\n", player)
-	
+
 	// Show initial empty board
 	fmt.Printf("\nStarting with empty board:\n")
 	displayPlayerBoard(db, player)
@@ -333,7 +358,7 @@ func placeShipsForPlayer(db *DB, player string) error {
 			}
 
 			fmt.Printf("%s placed successfully!\n", ship.Name)
-			
+
 			// Show updated board after each ship placement
 			fmt.Printf("\nCurrent board state:\n")
 			displayPlayerBoard(db, player)
@@ -596,7 +621,7 @@ func handleAttack(db *DB) {
 		fmt.Printf("Failed to stage attack: %v\n", err)
 		return
 	}
-	
+
 	if _, err := db.conn.Exec("CALL DOLT_ADD('turn')"); err != nil {
 		fmt.Printf("Failed to stage turn update: %v\n", err)
 		return
@@ -648,6 +673,174 @@ func handleStatus(db *DB) {
 		fmt.Printf("COMPLETED:%s\n", winner)
 	} else {
 		fmt.Printf("IN_PROGRESS\n")
+	}
+}
+
+func playGameLoop(db *DB, gameID, player string) {
+	// Ensure we're on the correct game branch before displaying board
+	if err := db.CheckoutBranch(gameID); err != nil {
+		fmt.Printf("Failed to checkout game branch: %v\n", err)
+		return
+	}
+
+	// Display initial board state
+	fmt.Printf("\nCurrent game state:\n")
+	displayPlayerBoard(db, player)
+
+	for {
+		// Check if game is complete
+		gameComplete, winner, err := db.CheckGameComplete(gameID)
+		if err != nil {
+			fmt.Printf("Failed to check game completion: %v\n", err)
+			return
+		}
+
+		if gameComplete {
+			fmt.Printf("\n🎉 GAME OVER! %s player wins!\n", strings.ToUpper(winner[:1])+winner[1:])
+
+			// Only the winning player should complete the game to avoid conflicts
+			if winner == player {
+				if err := db.CompleteGame(gameID, winner); err != nil {
+					fmt.Printf("Failed to complete game: %v\n", err)
+					return
+				}
+				fmt.Println("Game results have been saved.")
+			} else {
+				fmt.Println("Game completed by winning player.")
+			}
+			return
+		}
+
+		// Get current turn
+		currentTurn, err := db.GetCurrentTurn(gameID)
+		if err != nil {
+			fmt.Printf("Failed to determine current turn: %v\n", err)
+			return
+		}
+
+		if currentTurn == player {
+			// It's this player's turn - prompt for attack
+			for {
+				fmt.Printf("\n🎯 Your turn! Enter attack coordinate (e.g., A5): ")
+				var coordinate string
+				fmt.Scanln(&coordinate)
+
+				if len(coordinate) < 2 {
+					fmt.Println("Invalid coordinate format. Use format like A1, B5, etc.")
+					continue
+				}
+
+				// Parse coordinate (e.g., "A5" -> x="A", y=5)
+				x := string(coordinate[0])
+				y, err := strconv.Atoi(coordinate[1:])
+				if err != nil {
+					fmt.Println("Invalid coordinate format. Use format like A1, B5, etc.")
+					continue
+				}
+
+				// Process the attack
+				result, sunkShip, err := db.ProcessAttack(player, x, y)
+				if err != nil {
+					fmt.Printf("Attack failed: %v\n", err)
+					continue
+				}
+
+				if result == "hit" {
+					if sunkShip != "" {
+						fmt.Printf("💥 HIT! You sunk my %s!\n", sunkShip)
+					} else {
+						fmt.Printf("💥 HIT! You hit a ship at %s\n", coordinate)
+					}
+				} else {
+					fmt.Printf("💦 MISS! You missed at %s\n", coordinate)
+				}
+
+				// Show updated board
+				fmt.Printf("\nCurrent game state:\n")
+				displayPlayerBoard(db, player)
+				break
+			}
+
+		} else {
+			// Wait for opponent's turn
+			fmt.Printf("Waiting for %s player's move...\n", currentTurn)
+
+			// Get initial table hashes
+			initialTurnHash, err := db.GetTableHash("turn")
+			if err != nil {
+				// Table might have been dropped due to game completion
+				// Check if game has ended before reporting error
+				gameComplete, winner, checkErr := db.CheckGameCompleteFromMain(gameID)
+				if checkErr == nil && gameComplete {
+					fmt.Printf("\n🎉 GAME OVER! %s player wins!\n", strings.ToUpper(winner[:1])+winner[1:])
+					fmt.Println("Game results have been saved.")
+					return
+				}
+				fmt.Printf("Failed to get turn table hash: %v\n", err)
+				return
+			}
+
+			initialBoardHash, err := db.GetTableHash(fmt.Sprintf("%s_board", player))
+			if err != nil {
+				// Table might have been dropped due to game completion
+				// Check if game has ended before reporting error
+				gameComplete, winner, checkErr := db.CheckGameCompleteFromMain(gameID)
+				if checkErr == nil && gameComplete {
+					fmt.Printf("\n🎉 GAME OVER! %s player wins!\n", strings.ToUpper(winner[:1])+winner[1:])
+					fmt.Println("Game results have been saved.")
+					return
+				}
+				fmt.Printf("Failed to get board table hash: %v\n", err)
+				return
+			}
+
+			// Poll for changes
+			var currentBoardHash string
+			for {
+				time.Sleep(250 * time.Millisecond)
+
+				currentTurnHash, err := db.GetTableHash("turn")
+				if err != nil {
+					// Table might have been dropped due to game completion
+					// Check if game has ended before reporting error
+					gameComplete, winner, checkErr := db.CheckGameCompleteFromMain(gameID)
+					if checkErr == nil && gameComplete {
+						fmt.Printf("\n🎉 GAME OVER! %s player wins!\n", strings.ToUpper(winner[:1])+winner[1:])
+						fmt.Println("Game results have been saved.")
+						return
+					}
+					fmt.Printf("Failed to get current turn table hash: %v\n", err)
+					return
+				}
+
+				currentBoardHash, err = db.GetTableHash(fmt.Sprintf("%s_board", player))
+				if err != nil {
+					// Table might have been dropped due to game completion
+					// Check if game has ended before reporting error
+					gameComplete, winner, checkErr := db.CheckGameCompleteFromMain(gameID)
+					if checkErr == nil && gameComplete {
+						fmt.Printf("\n🎉 GAME OVER! %s player wins!\n", strings.ToUpper(winner[:1])+winner[1:])
+						fmt.Println("Game results have been saved.")
+						return
+					}
+					fmt.Printf("Failed to get current board table hash: %v\n", err)
+					return
+				}
+
+				// Check if turn has changed or our board was attacked
+				if currentTurnHash != initialTurnHash || currentBoardHash != initialBoardHash {
+					break
+				}
+			}
+
+			// Show updated board if we were attacked
+			if initialBoardHash != currentBoardHash {
+				clearTerminal()
+				fmt.Println("💥 You were attacked!")
+				fmt.Printf("\nCurrent game state:\n")
+				displayPlayerBoard(db, player)
+			}
+		}
 	}
 }
 
@@ -762,7 +955,7 @@ func handlePlay(db *DB) {
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
-	
+
 	// Then wait for both players to place ships
 	fmt.Println("Waiting for opponent to place ships...")
 	for {
@@ -798,225 +991,7 @@ func handlePlay(db *DB) {
 
 	// Clear terminal for clean game interface while preserving setup info
 	clearTerminal()
-	
-	// Main game loop
-	fmt.Println("=== GAME STARTED ===")
-	
-	// Ensure we're on the correct game branch before displaying board
-	if err := db.CheckoutBranch(gameID); err != nil {
-		fmt.Printf("Failed to checkout game branch: %v\n", err)
-		return
-	}
-	
-	// Display initial board state
-	fmt.Printf("\nCurrent game state:\n")
-	displayPlayerBoard(db, player)
-	
-	for {
-		// Check if game is complete
-		gameComplete, winner, err := db.CheckGameComplete(gameID)
-		if err != nil {
-			fmt.Printf("Failed to check game completion: %v\n", err)
-			return
-		}
 
-		if gameComplete {
-			fmt.Printf("\n🎉 GAME OVER! %s player wins!\n", strings.ToUpper(winner[:1])+winner[1:])
-			
-			// Complete the game
-			if err := db.CompleteGame(gameID, winner); err != nil {
-				fmt.Printf("Failed to complete game: %v\n", err)
-				return
-			}
-			
-			fmt.Println("Game results have been saved.")
-			return
-		}
-
-		// Get current turn
-		currentTurn, err := db.GetCurrentTurn(gameID)
-		if err != nil {
-			fmt.Printf("Failed to determine current turn: %v\n", err)
-			return
-		}
-
-		if currentTurn == player {
-			// It's this player's turn - prompt for attack
-			for {
-				fmt.Printf("\n🎯 Your turn! Enter attack coordinate (e.g., A5): ")
-				var coordinate string
-				fmt.Scanln(&coordinate)
-
-				if len(coordinate) < 2 {
-					fmt.Println("Invalid coordinate format. Use format like A1, B5, etc.")
-					continue
-				}
-
-				targetX := string(coordinate[0])
-				var targetY int
-				if _, err := fmt.Sscanf(coordinate[1:], "%d", &targetY); err != nil {
-					fmt.Println("Invalid Y coordinate. Please use numbers 1-10.")
-					continue
-				}
-
-				// Validate coordinates
-				if targetX < "A" || targetX > "J" {
-					fmt.Println("Invalid X coordinate. Please use letters A-J.")
-					continue
-				}
-
-				if targetY < 1 || targetY > 10 {
-					fmt.Println("Invalid Y coordinate. Please use numbers 1-10.")
-					continue
-				}
-
-				// Determine the target player
-				var targetPlayer string
-				if player == "red" {
-					targetPlayer = "blue"
-				} else {
-					targetPlayer = "red"
-				}
-
-				// Check if this coordinate has already been attacked
-				tableName := fmt.Sprintf("%s_board", targetPlayer)
-				var existingContent string
-				checkQuery := fmt.Sprintf("SELECT content FROM %s WHERE x = ? AND y = ?", tableName)
-				err = db.conn.QueryRow(checkQuery, targetX, targetY).Scan(&existingContent)
-				if err == nil {
-					// Position exists, check if it's already been shot at
-					if existingContent == string(HIT_CHAR) || existingContent == string(MISS_CHAR) {
-						fmt.Printf("Coordinate %s has already been attacked\n", coordinate)
-						continue
-					}
-				} else if err.Error() != "sql: no rows in result set" {
-					fmt.Printf("Failed to check coordinate: %v\n", err)
-					continue
-				}
-
-				// Process the attack
-				result, sunkShip, err := db.ProcessAttack(player, targetX, targetY)
-				if err != nil {
-					fmt.Printf("Failed to process attack: %v\n", err)
-					continue
-				}
-
-				// Stage and commit the attack
-				stageBoardQuery := fmt.Sprintf("CALL DOLT_ADD('%s_board')", targetPlayer)
-				if _, err := db.conn.Exec(stageBoardQuery); err != nil {
-					fmt.Printf("Failed to stage attack: %v\n", err)
-					continue
-				}
-
-				if _, err := db.conn.Exec("CALL DOLT_ADD('turn')"); err != nil {
-					fmt.Printf("Failed to stage turn update: %v\n", err)
-					continue
-				}
-
-				commitMessage := fmt.Sprintf("%s player attacked %s - %s", player, coordinate, result)
-				if err := db.CommitChanges(commitMessage); err != nil {
-					fmt.Printf("Failed to commit attack: %v\n", err)
-					continue
-				}
-
-				// Clear terminal and refresh display after attack
-				clearTerminal()
-				
-				// Display result
-				if result == "hit" {
-					fmt.Printf("🎯 HIT! You hit a ship at %s\n", coordinate)
-					if sunkShip != "" {
-						fmt.Printf("💥 You sunk their %s!\n", sunkShip)
-					}
-				} else {
-					fmt.Printf("💦 MISS! You missed at %s\n", coordinate)
-				}
-
-				// Show updated board
-				fmt.Printf("\nCurrent game state:\n")
-				displayPlayerBoard(db, player)
-				break
-			}
-
-		} else {
-			// Wait for opponent's turn
-			fmt.Printf("Waiting for %s player's move...\n", currentTurn)
-			
-			// Get initial table hashes
-			initialTurnHash, err := db.GetTableHash("turn")
-			if err != nil {
-				// Table might have been dropped due to game completion
-				// Check if game has ended before reporting error
-				gameComplete, winner, checkErr := db.CheckGameCompleteFromMain(gameID)
-				if checkErr == nil && gameComplete {
-					fmt.Printf("\n🎉 GAME OVER! %s player wins!\n", strings.ToUpper(winner[:1])+winner[1:])
-					fmt.Println("Game results have been saved.")
-					return
-				}
-				fmt.Printf("Failed to get turn table hash: %v\n", err)
-				return
-			}
-			
-			initialBoardHash, err := db.GetTableHash(fmt.Sprintf("%s_board", player))
-			if err != nil {
-				// Table might have been dropped due to game completion
-				// Check if game has ended before reporting error
-				gameComplete, winner, checkErr := db.CheckGameCompleteFromMain(gameID)
-				if checkErr == nil && gameComplete {
-					fmt.Printf("\n🎉 GAME OVER! %s player wins!\n", strings.ToUpper(winner[:1])+winner[1:])
-					fmt.Println("Game results have been saved.")
-					return
-				}
-				fmt.Printf("Failed to get board table hash: %v\n", err)
-				return
-			}
-
-			// Poll for changes
-			var currentBoardHash string
-			for {
-				time.Sleep(250 * time.Millisecond)
-				
-				currentTurnHash, err := db.GetTableHash("turn")
-				if err != nil {
-					// Table might have been dropped due to game completion
-					// Check if game has ended before reporting error
-					gameComplete, winner, checkErr := db.CheckGameCompleteFromMain(gameID)
-					if checkErr == nil && gameComplete {
-						fmt.Printf("\n🎉 GAME OVER! %s player wins!\n", strings.ToUpper(winner[:1])+winner[1:])
-						fmt.Println("Game results have been saved.")
-						return
-					}
-					fmt.Printf("Failed to get current turn table hash: %v\n", err)
-					return
-				}
-				
-				currentBoardHash, err = db.GetTableHash(fmt.Sprintf("%s_board", player))
-				if err != nil {
-					// Table might have been dropped due to game completion
-					// Check if game has ended before reporting error
-					gameComplete, winner, checkErr := db.CheckGameCompleteFromMain(gameID)
-					if checkErr == nil && gameComplete {
-						fmt.Printf("\n🎉 GAME OVER! %s player wins!\n", strings.ToUpper(winner[:1])+winner[1:])
-						fmt.Println("Game results have been saved.")
-						return
-					}
-					fmt.Printf("Failed to get current board table hash: %v\n", err)
-					return
-				}
-
-				// Check if turn has changed or our board was attacked
-				if currentTurnHash != initialTurnHash || currentBoardHash != initialBoardHash {
-					break
-				}
-			}
-
-			// Show updated board if we were attacked
-			if initialBoardHash != currentBoardHash {
-				clearTerminal()
-				fmt.Println("💥 You were attacked!")
-				fmt.Printf("\nCurrent game state:\n")
-				displayPlayerBoard(db, player)
-			}
-		}
-	}
+	// Continue with the game loop
+	playGameLoop(db, gameID, player)
 }
