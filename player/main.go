@@ -354,6 +354,12 @@ func handlePlayerIO(player *Player, stdin io.WriteCloser, stdout, stderr io.Read
 						stdin.Write([]byte(orientation + "\n"))
 						shipIndex++
 					}
+				} else if strings.Contains(line, "Enter attack coordinate") || strings.Contains(line, "Your turn!") {
+					// Handle attack prompts
+					shipPlacementComplete = true // We're now in the game phase
+					move := player.Strategy.GetNextMove(gameState)
+					fmt.Printf("[%s] Making attack: %s\n", player.Name, move)
+					stdin.Write([]byte(move + "\n"))
 				}
 				buffer = ""
 			}
