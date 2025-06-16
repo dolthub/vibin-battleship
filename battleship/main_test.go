@@ -1133,6 +1133,43 @@ func TestCheckGameCompleteFromDifferentBranch(t *testing.T) {
 	assert.Equal(t, winner, winner2, "Results should be consistent")
 }
 
+func TestStatusCommand(t *testing.T) {
+	harness := NewTestHarness(t)
+	defer harness.Cleanup()
+
+	// Test with nonexistent game
+	output := harness.RunBattleshipCommand(t, "status", "nonexistent-game-id")
+	assert.Contains(t, output, "not found", "Should indicate game not found")
+
+	// Test with in-progress game
+	createOutput := harness.RunBattleshipCommand(t, "new")
+	// Extract game ID from output like "New game created with ID: xxx"
+	lines := strings.Split(createOutput, "\n")
+	var gameID string
+	for _, line := range lines {
+		if strings.Contains(line, "New game created with ID:") {
+			parts := strings.Split(line, "ID: ")
+			if len(parts) > 1 {
+				gameID = strings.TrimSpace(parts[1])
+				break
+			}
+		}
+	}
+	require.NotEmpty(t, gameID, "Failed to extract game ID from create output")
+
+	// Check status of new game (should be in progress)
+	statusOutput := harness.RunBattleshipCommand(t, "status", gameID)
+	assert.Contains(t, statusOutput, "IN_PROGRESS", "Should show game in progress")
+
+	// Test with completed game - manually update the games table
+	_, err := harness.DB.conn.Exec("UPDATE games SET winner = ? WHERE id = ?", "red", gameID)
+	require.NoError(t, err, "Failed to set game winner")
+
+	// Check status of completed game
+	completedStatusOutput := harness.RunBattleshipCommand(t, "status", gameID)
+	assert.Contains(t, completedStatusOutput, "COMPLETED:red", "Should show game completed with winner")
+}
+
 func TestPlayCommandSkipsShipPlacementWhenAlreadyPlaced(t *testing.T) {
 	harness := NewTestHarness(t)
 	defer harness.Cleanup()

@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -159,32 +158,34 @@ func waitForGameCompletion(gameID string) {
 	fmt.Printf("🔍 Monitoring game %s for completion...\n", gameID)
 	
 	for {
-		// Try to connect to the game with a timeout
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		cmd := exec.CommandContext(ctx, "battleship", "play", gameID, "red")
+		// Use the new status command to check game state
+		cmd := exec.Command("battleship", "status", gameID)
+		output, err := cmd.Output()
 		
-		output, err := cmd.CombinedOutput()
-		cancel()
+		if err != nil {
+			fmt.Printf("🔍 Error checking game status: %v\n", err)
+			time.Sleep(5 * time.Second)
+			continue
+		}
 		
-		outputStr := string(output)
+		status := strings.TrimSpace(string(output))
 		
-		// Check for game completion indicators
-		if strings.Contains(outputStr, "Game Over") || 
-		   strings.Contains(outputStr, "wins!") || 
-		   strings.Contains(outputStr, "completed") {
-			fmt.Printf("🎉 Game %s has completed!\n", gameID)
+		// Check if game is completed
+		if strings.HasPrefix(status, "COMPLETED:") {
+			winner := strings.TrimPrefix(status, "COMPLETED:")
+			fmt.Printf("🎉 Game %s completed! Winner: %s\n", gameID, winner)
 			return
 		}
 		
-		// If command timed out, game is probably still active (waiting for input)
-		// If command failed quickly, check if it's due to game completion
-		if err != nil && !strings.Contains(err.Error(), "killed") {
-			// Some other error - might indicate game is complete or invalid
-			fmt.Printf("🔍 Checking game status... (error: %v)\n", err)
+		// Game is still in progress
+		if status == "IN_PROGRESS" {
+			fmt.Printf("🔍 Game still in progress...\n")
+		} else {
+			fmt.Printf("🔍 Game status: %s\n", status)
 		}
 		
-		// Wait 5 seconds before checking again
-		time.Sleep(5 * time.Second)
+		// Wait 3 seconds before checking again
+		time.Sleep(3 * time.Second)
 	}
 }
 

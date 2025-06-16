@@ -96,6 +96,8 @@ func runMain(host, port, database string) {
 		handlePrintBoard(db)
 	case "attack":
 		handleAttack(db)
+	case "status":
+		handleStatus(db)
 	case "help":
 		printUsage()
 	default:
@@ -113,6 +115,7 @@ func printUsage() {
 	fmt.Println("  battleship play <game_id> <red|blue>     - Play an interactive game")
 	fmt.Println("  battleship print <game_id> <red|blue>    - Print current board state")
 	fmt.Println("  battleship attack <game_id> <red|blue> <coordinate> - Attack a coordinate (e.g., A5)")
+	fmt.Println("  battleship status <game_id>              - Show game status")
 	fmt.Println("  battleship list                          - List all games")
 	fmt.Println("  battleship help                          - Show this help")
 }
@@ -623,6 +626,29 @@ func handleAttack(db *DB) {
 	}
 
 	fmt.Printf("Next turn: %s player\n", nextTurn)
+}
+
+func handleStatus(db *DB) {
+	if len(os.Args) < 3 {
+		fmt.Println("Usage: battleship status <game_id>")
+		return
+	}
+
+	gameID := os.Args[2]
+
+	// Check if game exists and get winner status
+	var winner string
+	err := db.conn.QueryRow("SELECT winner FROM games WHERE id = ?", gameID).Scan(&winner)
+	if err != nil {
+		fmt.Printf("Game %s not found\n", gameID)
+		return
+	}
+
+	if winner != "" {
+		fmt.Printf("COMPLETED:%s\n", winner)
+	} else {
+		fmt.Printf("IN_PROGRESS\n")
+	}
 }
 
 func handlePlay(db *DB) {
