@@ -996,10 +996,10 @@ func TestFullGamePlaythrough(t *testing.T) {
 			assert.Greater(t, redShots, 0, "Red should have made some shots")
 			assert.Greater(t, blueShots, 0, "Blue should have made some shots")
 
-			// Verify that the game branch has been deleted
+			// Verify that the game branch still exists (deletion disabled)
 			branchExists, err := harness.DB.BranchExists(gameID)
 			require.NoError(t, err, "Failed to check if game branch exists")
-			assert.False(t, branchExists, "Game branch should be deleted after completion")
+			assert.True(t, branchExists, "Game branch should still exist after completion (deletion disabled to avoid conflicts)")
 
 			// Verify that main branch contains a merge commit
 			// Look for merge commit in recent history

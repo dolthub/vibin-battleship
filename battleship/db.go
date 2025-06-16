@@ -82,7 +82,7 @@ func (db *DB) MergeBranch(branch, targetBranch string) error {
 		return err
 	}
 	
-	query := fmt.Sprintf("CALL DOLT_MERGE('%s')", branch)
+	query := fmt.Sprintf("CALL DOLT_MERGE('%s', '--no-ff')", branch)
 	_, err := db.conn.Exec(query)
 	if err != nil {
 		return fmt.Errorf("failed to merge branch %s into %s: %w", branch, targetBranch, err)
@@ -613,16 +613,16 @@ func (db *DB) CompleteGame(gameID, winner string) error {
 	}
 	
 	// Merge the game branch into main using DOLT_MERGE
-	mergeQuery := fmt.Sprintf("CALL DOLT_MERGE('%s')", gameID)
+	mergeQuery := fmt.Sprintf("CALL DOLT_MERGE('%s', '--no-ff')", gameID)
 	if _, err := db.conn.Exec(mergeQuery); err != nil {
 		return fmt.Errorf("failed to merge game branch %s into main: %w", gameID, err)
 	}
 	
-	// Delete the game branch after successful merge
-	deleteBranchQuery := fmt.Sprintf("CALL DOLT_BRANCH('-d', '%s')", gameID)
-	if _, err := db.conn.Exec(deleteBranchQuery); err != nil {
-		return fmt.Errorf("failed to delete game branch %s: %w", gameID, err)
-	}
+	// Skip deleting the game branch to avoid conflicts when multiple sessions are active
+	// deleteBranchQuery := fmt.Sprintf("CALL DOLT_BRANCH('-d', '%s')", gameID)
+	// if _, err := db.conn.Exec(deleteBranchQuery); err != nil {
+	//	return fmt.Errorf("failed to delete game branch %s: %w", gameID, err)
+	// }
 	
 	return nil
 }
