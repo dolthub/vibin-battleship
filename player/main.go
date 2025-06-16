@@ -84,8 +84,25 @@ func main() {
 		fmt.Printf("   battleship play %s %s\n", gameID, player2.Color)
 	}
 
+	// Wait for human players to connect before starting AI players
+	humanPlayers := []*Player{}
+	if _, isHuman := player1.Strategy.(*HumanStrategy); isHuman {
+		humanPlayers = append(humanPlayers, player1)
+	}
+	if _, isHuman := player2.Strategy.(*HumanStrategy); isHuman {
+		humanPlayers = append(humanPlayers, player2)
+	}
+
+	// Wait for human players to join
+	for _, humanPlayer := range humanPlayers {
+		fmt.Printf("⏳ Waiting for %s player to connect...\n", humanPlayer.Color)
+		waitForPlayerToJoin(gameID, humanPlayer.Color)
+		fmt.Printf("✅ %s player connected!\n", humanPlayer.Color)
+	}
+
 	// Start AI players
 	if len(aiPlayers) > 0 {
+		fmt.Printf("🤖 Starting %d AI player(s)...\n", len(aiPlayers))
 		wg.Add(len(aiPlayers))
 
 		for _, player := range aiPlayers {
@@ -152,6 +169,28 @@ func createNewGame() (string, error) {
 	}
 
 	return matches[1], nil
+}
+
+func waitForPlayerToJoin(gameID, playerColor string) {
+	for {
+		// Try to run "battleship print" for the player
+		cmd := exec.Command("battleship", "print", gameID, playerColor)
+		output, err := cmd.Output()
+		
+		if err == nil {
+			// If print succeeded, check the output
+			outputStr := string(output)
+			if strings.Contains(outputStr, "has not joined this game yet") {
+				// Player hasn't joined yet, keep waiting
+			} else if strings.Contains(outputStr, "Player's Board:") {
+				// Player has joined and has a board - they're connected
+				return
+			}
+		}
+		
+		// Wait 2 seconds before checking again
+		time.Sleep(2 * time.Second)
+	}
 }
 
 func waitForGameCompletion(gameID string) {
