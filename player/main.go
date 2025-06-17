@@ -113,50 +113,57 @@ func main() {
 		humanPlayers = append(humanPlayers, player2)
 	}
 
-	// Wait for human players to join
-	for _, humanPlayer := range humanPlayers {
+	// Handle different game types
+	if len(aiPlayers) == 2 {
+		// AI vs AI - simplified direct gameplay
 		if prettyPlayer == "" {
-			fmt.Printf("⏳ Waiting for %s player to connect...\n", humanPlayer.Color)
+			fmt.Printf("🤖 Starting AI vs AI game...\n")
 		}
-		waitForPlayerToJoin(gameID, humanPlayer.Color)
+		playAIvsAIGame(player1, player2)
+	} else if len(aiPlayers) == 1 {
+		// AI vs Human - start AI and wait for human
 		if prettyPlayer == "" {
-			fmt.Printf("✅ %s player connected!\n", humanPlayer.Color)
+			fmt.Printf("🤖 Starting AI player and waiting for human...\n")
 		}
-	}
+		
+		// Start AI player
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			playAIGame(aiPlayers[0])
+		}()
 
-	// Start AI players
-	if len(aiPlayers) > 0 {
-		if prettyPlayer == "" {
-			fmt.Printf("🤖 Starting %d AI player(s)...\n", len(aiPlayers))
+		// Wait for human players to join
+		for _, humanPlayer := range humanPlayers {
+			if prettyPlayer == "" {
+				fmt.Printf("⏳ Waiting for %s player to connect...\n", humanPlayer.Color)
+			}
+			waitForPlayerToJoin(gameID, humanPlayer.Color)
+			if prettyPlayer == "" {
+				fmt.Printf("✅ %s player connected!\n", humanPlayer.Color)
+			}
 		}
-		wg.Add(len(aiPlayers))
 
-		for _, player := range aiPlayers {
-			go func(p *Player) {
-				defer wg.Done()
-				playAIGame(p)
-			}(player)
-		}
-
+		// Wait for AI player to complete
 		wg.Wait()
-	}
-
-	// Wait for game completion regardless of player types
-	if prettyPlayer == "" {
-		if len(aiPlayers) == 0 {
+		
+		if prettyPlayer == "" {
+			fmt.Println("⏳ Waiting for human player to complete the game...")
+		}
+		
+		// Monitor game completion
+		waitForGameCompletion(gameID)
+	} else {
+		// Human vs Human
+		if prettyPlayer == "" {
 			fmt.Println("📋 Both players are human - no AI players to start.")
 			fmt.Println("   Use the commands above to connect to the game in separate terminals.")
 			fmt.Println("⏳ Waiting for game to complete...")
-		} else {
-			fmt.Printf("🤖 AI players completed!\n")
-			if len(aiPlayers) < 2 {
-				fmt.Println("⏳ Waiting for human player to complete the game...")
-			}
 		}
+		
+		// Monitor game completion
+		waitForGameCompletion(gameID)
 	}
-	
-	// Monitor game completion
-	waitForGameCompletion(gameID)
 }
 
 func isValidPlayerType(playerType string) bool {
@@ -268,28 +275,142 @@ func waitForGameCompletion(gameID string) {
 	}
 }
 
+func playAIvsAIGame(player1, player2 *Player) {
+	if globalPrettyPlayer == "" {
+		fmt.Printf("🤖 Starting simplified AI vs AI game between %s and %s\n", player1.Name, player2.Name)
+	}
+
+	// Place ships for both players
+	for _, player := range []*Player{player1, player2} {
+		if globalPrettyPlayer == "" {
+			fmt.Printf("[%s] Placing ships...\n", player.Name)
+		}
+		
+		shipPlacements := player.Strategy.PlaceShips()
+		for _, placement := range shipPlacements {
+			orientation := "v"
+			if placement.IsHorizontal {
+				orientation = "h"
+			}
+			
+			placeCmd := exec.Command("battleship", "place", player.GameID, player.Color, placement.Position, orientation)
+			if err := placeCmd.Run(); err != nil {
+				log.Printf("Error placing ship for %s at %s: %v", player.Name, placement.Position, err)
+				return
+			}
+			
+			if globalPrettyPlayer == "" {
+				fmt.Printf("[%s] Placed ship at %s (%s)\n", player.Name, placement.Position, orientation)
+			}
+		}
+	}
+
+	if globalPrettyPlayer == "" {
+		fmt.Printf("🤖 Both players finished placing ships, starting combat!\n")
+	}
+
+	// Determine starting player by checking turn order
+	currentPlayer := player1
+	otherPlayer := player2
+	
+	// Simple alternating attack loop
+	maxConsecutiveFailures := 10 // Limit consecutive failed attacks to prevent infinite loops
+	consecutiveFailures := 0
+	
+	for {
+		// Make attack with current player
+		attackPos := currentPlayer.Strategy.GetNextMove("")
+		attackCmd := exec.Command("battleship", "attack", currentPlayer.GameID, currentPlayer.Color, attackPos)
+		attackOutput, err := attackCmd.Output()
+		
+		if err != nil {
+			// If attack failed, it might not be this player's turn - try the other player
+			if strings.Contains(err.Error(), "not your turn") {
+				// Switch players and try again
+				currentPlayer, otherPlayer = otherPlayer, currentPlayer
+				continue
+			}
+			// If the coordinate was already attacked, just try again with the same player
+			if strings.Contains(err.Error(), "already been attacked") {
+				consecutiveFailures++
+				if consecutiveFailures >= maxConsecutiveFailures {
+					if globalPrettyPlayer == "" {
+						fmt.Printf("⚠️  Too many consecutive failed attacks, checking game status...\n")
+					}
+					break // Exit loop and check game status
+				}
+				if globalPrettyPlayer == "" {
+					fmt.Printf("[%s] Position %s already attacked, trying again... (%d/%d)\n", currentPlayer.Name, attackPos, consecutiveFailures, maxConsecutiveFailures)
+				}
+				continue
+			}
+			log.Printf("Error attacking for %s at %s: %v", currentPlayer.Name, attackPos, err)
+			return
+		}
+		
+		// Reset consecutive failures on successful attack
+		consecutiveFailures = 0
+		
+		if globalPrettyPlayer == "" {
+			result := strings.TrimSpace(string(attackOutput))
+			fmt.Printf("[%s] Attacked %s: %s\n", currentPlayer.Name, attackPos, result)
+		}
+		
+		// Check game status immediately after each attack
+		statusCmd := exec.Command("battleship", "status", player1.GameID)
+		statusOutput, err := statusCmd.Output()
+		if err != nil {
+			log.Printf("Error checking game status: %v", err)
+			return
+		}
+		
+		status := strings.TrimSpace(string(statusOutput))
+		
+		// Check if game is completed
+		if strings.HasPrefix(status, "COMPLETED:") {
+			if globalPrettyPlayer == "" {
+				winner := strings.TrimPrefix(status, "COMPLETED:")
+				fmt.Printf("🎉 AI vs AI game completed! Winner: %s\n", winner)
+			}
+			return
+		}
+		
+		// Switch to other player for next turn
+		currentPlayer, otherPlayer = otherPlayer, currentPlayer
+		
+		// Brief pause to avoid overwhelming the system
+		time.Sleep(50 * time.Millisecond)
+	}
+	
+	// Final status check in case we exited due to too many failures
+	statusCmd := exec.Command("battleship", "status", player1.GameID)
+	statusOutput, err := statusCmd.Output()
+	if err == nil {
+		status := strings.TrimSpace(string(statusOutput))
+		if strings.HasPrefix(status, "COMPLETED:") {
+			if globalPrettyPlayer == "" {
+				winner := strings.TrimPrefix(status, "COMPLETED:")
+				fmt.Printf("🎉 AI vs AI game completed! Winner: %s\n", winner)
+			}
+		} else {
+			if globalPrettyPlayer == "" {
+				fmt.Printf("⚠️  Game ended due to too many failed attacks. Final status: %s\n", status)
+			}
+		}
+	}
+}
+
 func playAIGame(player *Player) {
 	if globalPrettyPlayer == "" {
 		fmt.Printf("Starting AI player %s (%s) for game %s\n", player.Name, player.Color, player.GameID)
 	}
 	
-	// Join the game first
-	joinCmd := exec.Command("battleship", "join", player.GameID, player.Color)
-	if err := joinCmd.Run(); err != nil {
-		log.Printf("Error joining game for %s: %v", player.Name, err)
-		return
-	}
-	
-	if globalPrettyPlayer == "" {
-		fmt.Printf("[%s] Joined game %s\n", player.Name, player.GameID)
-	}
-	
-	// Place all ships
+	// Place all ships (this handles joining automatically)
 	shipPlacements := player.Strategy.PlaceShips()
 	for _, placement := range shipPlacements {
-		orientation := "vertical"
+		orientation := "v"
 		if placement.IsHorizontal {
-			orientation = "horizontal"
+			orientation = "h"
 		}
 		
 		placeCmd := exec.Command("battleship", "place", player.GameID, player.Color, placement.Position, orientation)
@@ -328,21 +449,8 @@ func playAIGame(player *Player) {
 			return
 		}
 		
-		// Check whose turn it is
-		turnCmd := exec.Command("battleship", "turn", player.GameID)
-		turnOutput, err := turnCmd.Output()
-		if err != nil {
-			log.Printf("Error checking turn for %s: %v", player.Name, err)
-			time.Sleep(1 * time.Second)
-			continue
-		}
-		
-		currentTurn := strings.TrimSpace(string(turnOutput))
-		if currentTurn != player.Color {
-			// Not our turn, wait a bit
-			time.Sleep(500 * time.Millisecond)
-			continue
-		}
+		// For now, just try to attack - the battleship command will handle turn logic
+		// TODO: Update battleship status command to include turn information
 		
 		// It's our turn, make an attack
 		attackPos := player.Strategy.GetNextMove("")
