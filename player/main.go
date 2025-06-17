@@ -56,8 +56,8 @@ func main() {
 		fmt.Printf("Red player: %s, Blue player: %s\n", *redPlayerType, *bluePlayerType)
 	}
 
-	// Create a new game
-	gameID, err := createNewGame()
+	// Create a new game with player type names (not display names)
+	gameID, err := createNewGameWithPlayers(*redPlayerType, *bluePlayerType)
 	if err != nil {
 		log.Fatalf("Failed to create new game: %v", err)
 	}
@@ -195,6 +195,23 @@ func createStrategy(playerType string) PlayerStrategy {
 
 func createNewGame() (string, error) {
 	cmd := exec.Command("battleship", "new")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("failed to create game: %v", err)
+	}
+
+	// Parse game ID from output
+	re := regexp.MustCompile(`New game created with ID: ([a-f0-9-]+)`)
+	matches := re.FindStringSubmatch(string(output))
+	if len(matches) < 2 {
+		return "", fmt.Errorf("could not parse game ID from output: %s", string(output))
+	}
+
+	return matches[1], nil
+}
+
+func createNewGameWithPlayers(redPlayerName, bluePlayerName string) (string, error) {
+	cmd := exec.Command("battleship", "new", redPlayerName, bluePlayerName)
 	output, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("failed to create game: %v", err)

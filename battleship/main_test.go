@@ -227,6 +227,172 @@ func TestNewCommandGeneratesGameID(t *testing.T) {
 	assert.Equal(t, "main", currentBranch, "Expected to be on main branch")
 }
 
+func TestNewCommandWithoutPlayerNames(t *testing.T) {
+	harness := NewTestHarness(t)
+	defer harness.Cleanup()
+
+	// Run the battleship new command without player names (backward compatibility)
+	output := harness.RunBattleshipCommand(t, "new")
+
+	// Verify the output contains a game ID
+	assert.Contains(t, output, "New game created with ID:", "Expected game creation message")
+	assert.NotContains(t, output, "Players:", "Should not show players line when no names provided")
+
+	// Extract game ID from output
+	gameID := extractGameID(t, output)
+
+	// Verify that the game was added to the games table with empty player names
+	var dbGameID, redPlayer, bluePlayer string
+	err := harness.DB.conn.QueryRow("SELECT id, red_player, blue_player FROM games WHERE id = ?", gameID).Scan(&dbGameID, &redPlayer, &bluePlayer)
+	require.NoError(t, err, "Failed to query games table for game ID")
+	assert.Equal(t, gameID, dbGameID, "Game ID should match database entry")
+	assert.Equal(t, "", redPlayer, "Red player should be empty when not provided")
+	assert.Equal(t, "", bluePlayer, "Blue player should be empty when not provided")
+
+	// Verify commit message doesn't include player names
+	var latestCommitMessage string
+	err = harness.DB.conn.QueryRow("SELECT message FROM dolt_log ORDER BY date DESC LIMIT 1").Scan(&latestCommitMessage)
+	require.NoError(t, err, "Failed to get latest commit message")
+	expectedMessage := fmt.Sprintf("Create new game %s", gameID)
+	assert.Equal(t, expectedMessage, latestCommitMessage, "Expected commit message without player names")
+}
+
+func TestNewCommandWithRedPlayerOnly(t *testing.T) {
+	harness := NewTestHarness(t)
+	defer harness.Cleanup()
+
+	// Run the battleship new command with only red player name
+	output := harness.RunBattleshipCommand(t, "new", "RandomBot")
+
+	// Verify the output contains a game ID and player info
+	assert.Contains(t, output, "New game created with ID:", "Expected game creation message")
+	assert.Contains(t, output, "Players: red=RandomBot, blue=", "Expected players line with red player")
+
+	// Extract game ID from output
+	gameID := extractGameID(t, output)
+
+	// Verify that the game was added to the games table with correct player names
+	var dbGameID, redPlayer, bluePlayer string
+	err := harness.DB.conn.QueryRow("SELECT id, red_player, blue_player FROM games WHERE id = ?", gameID).Scan(&dbGameID, &redPlayer, &bluePlayer)
+	require.NoError(t, err, "Failed to query games table for game ID")
+	assert.Equal(t, gameID, dbGameID, "Game ID should match database entry")
+	assert.Equal(t, "RandomBot", redPlayer, "Red player should be set to RandomBot")
+	assert.Equal(t, "", bluePlayer, "Blue player should be empty when not provided")
+
+	// Verify commit message includes player names
+	var latestCommitMessage string
+	err = harness.DB.conn.QueryRow("SELECT message FROM dolt_log ORDER BY date DESC LIMIT 1").Scan(&latestCommitMessage)
+	require.NoError(t, err, "Failed to get latest commit message")
+	expectedMessage := fmt.Sprintf("Create new game %s with players red:RandomBot blue:", gameID)
+	assert.Equal(t, expectedMessage, latestCommitMessage, "Expected commit message with player names")
+}
+
+func TestNewCommandWithBluePlayerOnly(t *testing.T) {
+	harness := NewTestHarness(t)
+	defer harness.Cleanup()
+
+	// Run the battleship new command with empty red and blue player name
+	output := harness.RunBattleshipCommand(t, "new", "", "TestBot")
+
+	// Verify the output contains a game ID and player info
+	assert.Contains(t, output, "New game created with ID:", "Expected game creation message")
+	assert.Contains(t, output, "Players: red=, blue=TestBot", "Expected players line with blue player")
+
+	// Extract game ID from output
+	gameID := extractGameID(t, output)
+
+	// Verify that the game was added to the games table with correct player names
+	var dbGameID, redPlayer, bluePlayer string
+	err := harness.DB.conn.QueryRow("SELECT id, red_player, blue_player FROM games WHERE id = ?", gameID).Scan(&dbGameID, &redPlayer, &bluePlayer)
+	require.NoError(t, err, "Failed to query games table for game ID")
+	assert.Equal(t, gameID, dbGameID, "Game ID should match database entry")
+	assert.Equal(t, "", redPlayer, "Red player should be empty when empty string provided")
+	assert.Equal(t, "TestBot", bluePlayer, "Blue player should be set to TestBot")
+
+	// Verify commit message includes player names
+	var latestCommitMessage string
+	err = harness.DB.conn.QueryRow("SELECT message FROM dolt_log ORDER BY date DESC LIMIT 1").Scan(&latestCommitMessage)
+	require.NoError(t, err, "Failed to get latest commit message")
+	expectedMessage := fmt.Sprintf("Create new game %s with players red: blue:TestBot", gameID)
+	assert.Equal(t, expectedMessage, latestCommitMessage, "Expected commit message with player names")
+}
+
+func TestNewCommandWithBothPlayerNames(t *testing.T) {
+	harness := NewTestHarness(t)
+	defer harness.Cleanup()
+
+	// Run the battleship new command with both player names
+	output := harness.RunBattleshipCommand(t, "new", "RandomBot_red", "TestBot_blue")
+
+	// Verify the output contains a game ID and player info
+	assert.Contains(t, output, "New game created with ID:", "Expected game creation message")
+	assert.Contains(t, output, "Players: red=RandomBot_red, blue=TestBot_blue", "Expected players line with both players")
+
+	// Extract game ID from output
+	gameID := extractGameID(t, output)
+
+	// Verify that the game was added to the games table with correct player names
+	var dbGameID, redPlayer, bluePlayer string
+	err := harness.DB.conn.QueryRow("SELECT id, red_player, blue_player FROM games WHERE id = ?", gameID).Scan(&dbGameID, &redPlayer, &bluePlayer)
+	require.NoError(t, err, "Failed to query games table for game ID")
+	assert.Equal(t, gameID, dbGameID, "Game ID should match database entry")
+	assert.Equal(t, "RandomBot_red", redPlayer, "Red player should be set to RandomBot_red")
+	assert.Equal(t, "TestBot_blue", bluePlayer, "Blue player should be set to TestBot_blue")
+
+	// Verify commit message includes player names
+	var latestCommitMessage string
+	err = harness.DB.conn.QueryRow("SELECT message FROM dolt_log ORDER BY date DESC LIMIT 1").Scan(&latestCommitMessage)
+	require.NoError(t, err, "Failed to get latest commit message")
+	expectedMessage := fmt.Sprintf("Create new game %s with players red:RandomBot_red blue:TestBot_blue", gameID)
+	assert.Equal(t, expectedMessage, latestCommitMessage, "Expected commit message with player names")
+}
+
+func TestNewCommandWithSpecialCharacters(t *testing.T) {
+	harness := NewTestHarness(t)
+	defer harness.Cleanup()
+
+	// Run the battleship new command with player names containing special characters
+	output := harness.RunBattleshipCommand(t, "new", "AI-Player_1", "Bot.v2.0")
+
+	// Verify the output contains a game ID and player info
+	assert.Contains(t, output, "New game created with ID:", "Expected game creation message")
+	assert.Contains(t, output, "Players: red=AI-Player_1, blue=Bot.v2.0", "Expected players line with special characters")
+
+	// Extract game ID from output
+	gameID := extractGameID(t, output)
+
+	// Verify that the game was added to the games table with correct player names
+	var dbGameID, redPlayer, bluePlayer string
+	err := harness.DB.conn.QueryRow("SELECT id, red_player, blue_player FROM games WHERE id = ?", gameID).Scan(&dbGameID, &redPlayer, &bluePlayer)
+	require.NoError(t, err, "Failed to query games table for game ID")
+	assert.Equal(t, gameID, dbGameID, "Game ID should match database entry")
+	assert.Equal(t, "AI-Player_1", redPlayer, "Red player should handle special characters")
+	assert.Equal(t, "Bot.v2.0", bluePlayer, "Blue player should handle special characters")
+}
+
+func TestNewCommandIntegrationWithPlayerTypes(t *testing.T) {
+	harness := NewTestHarness(t)
+	defer harness.Cleanup()
+
+	// Test the exact scenario: player command should store type names, not display names
+	output := harness.RunBattleshipCommand(t, "new", "human", "random")
+
+	// Verify the output shows the actual type names
+	assert.Contains(t, output, "New game created with ID:", "Expected game creation message")
+	assert.Contains(t, output, "Players: red=human, blue=random", "Expected actual player type names")
+
+	// Extract game ID from output
+	gameID := extractGameID(t, output)
+
+	// Verify that the game was added to the games table with actual type names
+	var dbGameID, redPlayer, bluePlayer string
+	err := harness.DB.conn.QueryRow("SELECT id, red_player, blue_player FROM games WHERE id = ?", gameID).Scan(&dbGameID, &redPlayer, &bluePlayer)
+	require.NoError(t, err, "Failed to query games table for game ID")
+	assert.Equal(t, gameID, dbGameID, "Game ID should match database entry")
+	assert.Equal(t, "human", redPlayer, "Should store actual player type 'human', not 'Human_red'")
+	assert.Equal(t, "random", bluePlayer, "Should store actual player type 'random', not 'RandomBot_blue'")
+}
+
 func TestListCommandShowsMultipleGames(t *testing.T) {
 	harness := NewTestHarness(t)
 	defer harness.Cleanup()

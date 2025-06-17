@@ -114,7 +114,7 @@ func printUsage() {
 	fmt.Println("Battleship - Command Line Game")
 	fmt.Println("")
 	fmt.Println("Usage:")
-	fmt.Println("  battleship new                           - Create a new game")
+	fmt.Println("  battleship new [red_player] [blue_player] - Create a new game with optional player names")
 	fmt.Println("  battleship join <game_id> <red|blue>     - Join a game as red or blue player")
 	fmt.Println("  battleship play <game_id> <red|blue>     - Play an interactive game")
 	fmt.Println("  battleship print <game_id> <red|blue>    - Print current board state")
@@ -127,11 +127,20 @@ func printUsage() {
 
 func handleNewGame(db *DB) {
 	gameID := uuid.New().String()
+	
+	// Parse optional player names from command line arguments
+	var redPlayer, bluePlayer string
+	if len(os.Args) >= 3 {
+		redPlayer = os.Args[2]
+	}
+	if len(os.Args) >= 4 {
+		bluePlayer = os.Args[3]
+	}
 
 	// Insert initial game row into games table
 	query := `INSERT INTO games (id, red_player, blue_player, winner, total_shots_red, total_shots_blue, total_hits_red, total_hits_blue, game_duration_seconds) 
-			  VALUES (?, '', '', '', 0, 0, 0, 0, 0)`
-	_, err := db.conn.Exec(query, gameID)
+			  VALUES (?, ?, ?, '', 0, 0, 0, 0, 0)`
+	_, err := db.conn.Exec(query, gameID, redPlayer, bluePlayer)
 	if err != nil {
 		fmt.Printf("Failed to create game: %v\n", err)
 		return
@@ -143,13 +152,22 @@ func handleNewGame(db *DB) {
 		return
 	}
 
-	commitMessage := fmt.Sprintf("Create new game %s", gameID)
+	var commitMessage string
+	if redPlayer != "" || bluePlayer != "" {
+		commitMessage = fmt.Sprintf("Create new game %s with players red:%s blue:%s", gameID, redPlayer, bluePlayer)
+	} else {
+		commitMessage = fmt.Sprintf("Create new game %s", gameID)
+	}
+	
 	if err := db.CommitChanges(commitMessage); err != nil {
 		fmt.Printf("Failed to commit game creation: %v\n", err)
 		return
 	}
 
 	fmt.Printf("New game created with ID: %s\n", gameID)
+	if redPlayer != "" || bluePlayer != "" {
+		fmt.Printf("Players: red=%s, blue=%s\n", redPlayer, bluePlayer)
+	}
 	fmt.Println("Share this ID with another player to join the game.")
 }
 
