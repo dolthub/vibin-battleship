@@ -314,9 +314,20 @@ func playAIGame(player *Player) {
 
 func handlePlayerIO(player *Player, stdin io.WriteCloser, stdout, stderr io.ReadCloser) {
 	defer stdin.Close()
-
+	
 	// Check if we're in pretty print mode and if this is the player we want to show
 	isPrettyMode := globalPrettyPlayer != ""
+	
+	// Create a function to write and immediately sync stdin
+	writeAndFlushStdin := func(data []byte) {
+		n, err := stdin.Write(data)
+		if err != nil {
+			log.Printf("Error writing to stdin for %s: %v", player.Name, err)
+		}
+		if !isPrettyMode {
+			log.Printf("Wrote %d bytes to %s stdin: %q", n, player.Name, string(data))
+		}
+	}
 	showThisPlayer := isPrettyMode && player.Color == globalPrettyPlayer
 
 	// If this is the pretty player, use a completely different approach
@@ -344,9 +355,9 @@ func handlePlayerIO(player *Player, stdin io.WriteCloser, stdout, stderr io.Read
 	buffer := ""
 
 	for {
-		// Read with a timeout to detect prompts that don't end with newlines
-		b := make([]byte, 1)
-		n, err := reader.Read(b)
+		// Read in larger chunks for better performance 
+		chunk := make([]byte, 1024)
+		n, err := reader.Read(chunk)
 		if err != nil {
 			if err == io.EOF {
 				break
@@ -355,34 +366,39 @@ func handlePlayerIO(player *Player, stdin io.WriteCloser, stdout, stderr io.Read
 			return
 		}
 		if n > 0 {
-			buffer += string(b[0])
+			buffer += string(chunk[:n])
 			
-			// If we see a newline, process the complete line
-			if b[0] == '\n' {
-				line := strings.TrimSpace(buffer)
-				if line != "" {
-					// Only show output if we're not in pretty mode, or if this is the pretty player
+			// Process complete lines in buffer
+			for strings.Contains(buffer, "\n") {
+				newlinePos := strings.Index(buffer, "\n")
+				line := strings.TrimSpace(buffer[:newlinePos])
+				buffer = buffer[newlinePos+1:]
+				if line == "" {
+					continue
+				}
+				
+				// Only show output if we're not in pretty mode, or if this is the pretty player
+				if !isPrettyMode {
+					fmt.Printf("[%s] %s\n", player.Name, line)
+				} else if showThisPlayer {
+					fmt.Println(line) // Clean output without player prefix
+				}
+				gameState += line + "\n"
+				
+				// Check if ship placement is complete
+				if strings.Contains(line, "player has completed ship placement") || strings.Contains(line, "Both players have placed ships") {
+					shipPlacementComplete = true
+				}
+				
+				// Check if we need to make an attack move
+				if strings.Contains(line, "Enter attack coordinate") || strings.Contains(line, "Your turn!") {
+					shipPlacementComplete = true // We're now in the game phase
+					move := player.Strategy.GetNextMove(gameState)
 					if !isPrettyMode {
-						fmt.Printf("[%s] %s\n", player.Name, line)
-					} else if showThisPlayer {
-						fmt.Println(line) // Clean output without player prefix
+						fmt.Printf("[%s] Making attack: %s\n", player.Name, move)
 					}
-					gameState += line + "\n"
-					
-					// Check if ship placement is complete
-					if strings.Contains(line, "player has completed ship placement") || strings.Contains(line, "Both players have placed ships") {
-						shipPlacementComplete = true
-					}
-					
-					// Check if we need to make an attack move
-					if strings.Contains(line, "Enter attack coordinate") || strings.Contains(line, "Your turn!") {
-						shipPlacementComplete = true // We're now in the game phase
-						move := player.Strategy.GetNextMove(gameState)
-						if !isPrettyMode {
-							fmt.Printf("[%s] Making attack: %s\n", player.Name, move)
-						}
-						stdin.Write([]byte(move + "\n"))
-					}
+					writeAndFlushStdin([]byte(move + "\n"))
+				}
 					
 					// Only check for game endings during actual gameplay, not ship placement
 					if shipPlacementComplete && (strings.Contains(line, "Game Over") || strings.Contains(line, "wins!")) {
@@ -401,11 +417,11 @@ func handlePlayerIO(player *Player, stdin io.WriteCloser, stdout, stderr io.Read
 					}
 				}
 				buffer = ""
-			} else if strings.HasSuffix(buffer, ": ") {
+			} else if strings.HasSuffix(buffer, ": ") || strings.HasSuffix(buffer, "): ") {
 				// This looks like a prompt - handle it
 				line := strings.TrimSpace(buffer)
 				if !isPrettyMode {
-					fmt.Printf("[%s] %s\n", player.Name, line)
+					fmt.Printf("[%s] PROMPT: %s\n", player.Name, line)
 				} else if showThisPlayer {
 					fmt.Println(line)
 				}
@@ -416,7 +432,7 @@ func handlePlayerIO(player *Player, stdin io.WriteCloser, stdout, stderr io.Read
 						if !isPrettyMode {
 							fmt.Printf("[%s] Placing ship at: %s\n", player.Name, placement.Position)
 						}
-						stdin.Write([]byte(placement.Position + "\n"))
+						writeAndFlushStdin([]byte(placement.Position + "\n"))
 					}
 				} else if strings.Contains(line, "Place horizontally") {
 					if shipIndex < len(shipPlacements) {
@@ -428,7 +444,7 @@ func handlePlayerIO(player *Player, stdin io.WriteCloser, stdout, stderr io.Read
 						if !isPrettyMode {
 							fmt.Printf("[%s] Orientation: %s\n", player.Name, orientation)
 						}
-						stdin.Write([]byte(orientation + "\n"))
+						writeAndFlushStdin([]byte(orientation + "\n"))
 						shipIndex++
 					}
 				} else if strings.Contains(line, "Enter attack coordinate") || strings.Contains(line, "Your turn!") {
@@ -438,16 +454,28 @@ func handlePlayerIO(player *Player, stdin io.WriteCloser, stdout, stderr io.Read
 					if !isPrettyMode {
 						fmt.Printf("[%s] Making attack: %s\n", player.Name, move)
 					}
-					stdin.Write([]byte(move + "\n"))
+					writeAndFlushStdin([]byte(move + "\n"))
 				}
 				buffer = ""
 			}
 		}
 	}
-}
 
 func handlePrettyPlayerIO(player *Player, stdin io.WriteCloser, stdout, stderr io.ReadCloser) {
 	defer stdin.Close()
+	
+	isPrettyMode := true // Always true in pretty mode
+	
+	// Create a function to write and immediately sync stdin
+	writeAndFlushStdin := func(data []byte) {
+		n, err := stdin.Write(data)
+		if err != nil {
+			log.Printf("Error writing to stdin for %s: %v", player.Name, err)
+		}
+		if !isPrettyMode {
+			log.Printf("Wrote %d bytes to %s stdin: %q", n, player.Name, string(data))
+		}
+	}
 
 	// Suppress stderr completely for pretty mode
 	go func() {
@@ -496,7 +524,7 @@ func handlePrettyPlayerIO(player *Player, stdin io.WriteCloser, stdout, stderr i
 						promptCh <- line
 					}
 					lineBuffer = ""
-				} else if strings.HasSuffix(lineBuffer, ": ") {
+				} else if strings.HasSuffix(lineBuffer, ": ") || strings.HasSuffix(lineBuffer, "): ") {
 					line := strings.TrimSpace(lineBuffer)
 					if strings.Contains(line, "Enter starting position") ||
 					   strings.Contains(line, "Place horizontally") ||
@@ -515,7 +543,7 @@ func handlePrettyPlayerIO(player *Player, stdin io.WriteCloser, stdout, stderr i
 		if strings.Contains(prompt, "Enter starting position") {
 			if shipIndex < len(shipPlacements) {
 				placement := shipPlacements[shipIndex]
-				stdin.Write([]byte(placement.Position + "\n"))
+				writeAndFlushStdin([]byte(placement.Position + "\n"))
 			}
 		} else if strings.Contains(prompt, "Place horizontally") {
 			if shipIndex < len(shipPlacements) {
@@ -524,12 +552,12 @@ func handlePrettyPlayerIO(player *Player, stdin io.WriteCloser, stdout, stderr i
 				if placement.IsHorizontal {
 					orientation = "y"
 				}
-				stdin.Write([]byte(orientation + "\n"))
+				writeAndFlushStdin([]byte(orientation + "\n"))
 				shipIndex++
 			}
 		} else if strings.Contains(prompt, "Enter attack coordinate") || strings.Contains(prompt, "Your turn!") {
 			move := player.Strategy.GetNextMove("")
-			stdin.Write([]byte(move + "\n"))
+			writeAndFlushStdin([]byte(move + "\n"))
 		}
 	}
 }
