@@ -23,17 +23,17 @@ type Player struct {
 
 func main() {
 	// Parse command line arguments
-	redPlayerType := flag.String("red-player", "random", "Type of red player: random or human")
-	bluePlayerType := flag.String("blue-player", "random", "Type of blue player: random or human")
+	redPlayerType := flag.String("red-player", "random", "Type of red player: random, human, or test")
+	bluePlayerType := flag.String("blue-player", "random", "Type of blue player: random, human, or test")
 	flag.Parse()
 
 	// Validate player types
 	if !isValidPlayerType(*redPlayerType) {
-		fmt.Printf("Invalid red player type: %s. Must be 'random' or 'human'\n", *redPlayerType)
+		fmt.Printf("Invalid red player type: %s. Must be 'random', 'human', or 'test'\n", *redPlayerType)
 		os.Exit(1)
 	}
 	if !isValidPlayerType(*bluePlayerType) {
-		fmt.Printf("Invalid blue player type: %s. Must be 'random' or 'human'\n", *bluePlayerType)
+		fmt.Printf("Invalid blue player type: %s. Must be 'random', 'human', or 'test'\n", *bluePlayerType)
 		os.Exit(1)
 	}
 
@@ -132,12 +132,14 @@ func main() {
 }
 
 func isValidPlayerType(playerType string) bool {
-	return playerType == "random" || playerType == "human"
+	return playerType == "random" || playerType == "human" || playerType == "test"
 }
 
 func getPlayerName(color, playerType string) string {
 	if playerType == "human" {
 		return fmt.Sprintf("Human_%s", color)
+	} else if playerType == "test" {
+		return fmt.Sprintf("TestBot_%s", color)
 	}
 	return fmt.Sprintf("RandomBot_%s", color)
 }
@@ -148,6 +150,8 @@ func createStrategy(playerType string) PlayerStrategy {
 		return &RandomStrategy{}
 	case "human":
 		return &HumanStrategy{}
+	case "test":
+		return &TestStrategy{attackIndex: 0}
 	default:
 		log.Fatalf("Unknown player type: %s", playerType)
 		return nil
