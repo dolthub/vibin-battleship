@@ -1432,3 +1432,177 @@ func TestPlaceCommand(t *testing.T) {
 	require.NoError(t, err, "Failed to get blue board state")
 	assert.Equal(t, string(CARRIER_CHAR), blueBoard["A"][10], "Blue carrier should be at A10")
 }
+
+func TestStatusCommandThroughGameLifecycle(t *testing.T) {
+	harness := NewTestHarness(t)
+	defer harness.Cleanup()
+
+	// Create a new game
+	newOutput := harness.RunBattleshipCommand(t, "new")
+	gameID := extractGameID(t, newOutput)
+
+	// Check initial status - should be IN_PROGRESS since no winner is set
+	statusOutput := harness.RunBattleshipCommand(t, "status", gameID)
+	assert.Contains(t, statusOutput, "IN_PROGRESS", "New game should be IN_PROGRESS")
+
+	// Set up game branch and place ships for both players
+	err := harness.DB.CreateGameBranch(gameID)
+	require.NoError(t, err, "Failed to create game branch")
+
+	err = harness.DB.CheckoutBranch(gameID)
+	require.NoError(t, err, "Failed to checkout game branch")
+
+	err = harness.DB.CreateTurnTable()
+	require.NoError(t, err, "Failed to create turn table")
+
+	err = harness.DB.CreateBoardTables()
+	require.NoError(t, err, "Failed to create board tables")
+
+	// Set up predetermined turn order - Red goes first
+	_, err = harness.DB.conn.Exec("INSERT INTO turn (player, value) VALUES ('red', 0.9)")
+	require.NoError(t, err, "Failed to insert red turn value")
+
+	_, err = harness.DB.conn.Exec("INSERT INTO turn (player, value) VALUES ('blue', 0.1)")
+	require.NoError(t, err, "Failed to insert blue turn value")
+
+	// Place Red's ships
+	redShips := []struct {
+		ship         Ship
+		startX       string
+		startY       int
+		isHorizontal bool
+	}{
+		{Ships[0], "A", 1, true},  // Carrier A1-E1
+		{Ships[1], "A", 3, true},  // Battleship A3-D3
+		{Ships[2], "F", 1, false}, // Cruiser F1-F3
+		{Ships[3], "H", 1, false}, // Submarine H1-H3
+		{Ships[4], "J", 5, false}, // Destroyer J5-J6
+	}
+
+	for _, shipPlacement := range redShips {
+		err := harness.DB.PlaceShip("red", shipPlacement.ship.Char, shipPlacement.startX, shipPlacement.startY, shipPlacement.isHorizontal, shipPlacement.ship.Length)
+		require.NoError(t, err, "Failed to place red %s", shipPlacement.ship.Name)
+	}
+
+	// Place Blue's ships  
+	blueShips := []struct {
+		ship         Ship
+		startX       string
+		startY       int
+		isHorizontal bool
+	}{
+		{Ships[0], "A", 6, true},  // Carrier A6-E6
+		{Ships[1], "A", 8, true},  // Battleship A8-D8
+		{Ships[2], "F", 6, false}, // Cruiser F6-F8
+		{Ships[3], "H", 6, false}, // Submarine H6-H8
+		{Ships[4], "J", 9, false}, // Destroyer J9-J10
+	}
+
+	for _, shipPlacement := range blueShips {
+		err := harness.DB.PlaceShip("blue", shipPlacement.ship.Char, shipPlacement.startX, shipPlacement.startY, shipPlacement.isHorizontal, shipPlacement.ship.Length)
+		require.NoError(t, err, "Failed to place blue %s", shipPlacement.ship.Name)
+	}
+
+	// Commit ship placements
+	if _, err := harness.DB.conn.Exec("CALL DOLT_ADD('turn', 'red_board', 'blue_board')"); err != nil {
+		require.NoError(t, err, "Failed to stage tables")
+	}
+	if err := harness.DB.CommitChanges("Set up game with ships placed"); err != nil {
+		require.NoError(t, err, "Failed to commit setup")
+	}
+
+	// Check status after setup - should still be IN_PROGRESS
+	statusOutput = harness.RunBattleshipCommand(t, "status", gameID)
+	assert.Contains(t, statusOutput, "IN_PROGRESS", "Game with ships placed should still be IN_PROGRESS")
+
+	// Execute some attacks, checking status periodically
+	attacks := []struct {
+		attacker   string
+		coordinate string
+		expectHit  bool
+		checkStatusAfter bool
+	}{
+		{"red", "A6", true, true},   // Hit Blue's Carrier, check status
+		{"blue", "A1", true, false}, // Hit Red's Carrier
+		{"red", "B6", true, false},  // Hit Blue's Carrier
+		{"blue", "B1", true, false}, // Hit Red's Carrier
+		{"red", "C6", true, true},   // Hit Blue's Carrier, check status
+		{"blue", "C1", true, false}, // Hit Red's Carrier
+		{"red", "D6", true, false},  // Hit Blue's Carrier
+		{"blue", "D1", true, false}, // Hit Red's Carrier
+		{"red", "E6", true, true},   // Hit Blue's Carrier - SUNK, check status
+		{"blue", "E1", true, false}, // Hit Red's Carrier - SUNK
+	}
+
+	for i, attack := range attacks {
+		t.Logf("Attack %d: %s attacks %s", i+1, attack.attacker, attack.coordinate)
+
+		// Use the attack command to ensure automatic game completion logic is triggered
+		attackOutput := harness.RunBattleshipCommand(t, "attack", gameID, attack.attacker, attack.coordinate)
+		
+		// Verify hit/miss result from output
+		if attack.expectHit {
+			assert.Contains(t, attackOutput, "HIT", "Expected hit for attack %d", i+1)
+		} else {
+			assert.Contains(t, attackOutput, "MISS", "Expected miss for attack %d", i+1)
+		}
+
+		// Check if this attack completed the game
+		if strings.Contains(attackOutput, "GAME OVER") {
+			t.Logf("Game completed after attack %d", i+1)
+			break
+		}
+
+		// Check status if requested
+		if attack.checkStatusAfter {
+			statusOutput = harness.RunBattleshipCommand(t, "status", gameID)
+			assert.Contains(t, statusOutput, "IN_PROGRESS", "Game should still be IN_PROGRESS after attack %d", i+1)
+		}
+	}
+
+	// Now sink all remaining ships to trigger game completion
+	// Alternate turns to sink Blue's ships (Red wins)
+	finalAttacks := []struct {
+		attacker   string
+		coordinate string
+	}{
+		// Sink Blue's Battleship (alternating with Blue missing)
+		{"red", "A8"}, {"blue", "A2"}, {"red", "B8"}, {"blue", "B2"}, {"red", "C8"}, {"blue", "C2"}, {"red", "D8"},
+		// Sink Blue's Cruiser (alternating with Blue missing)  
+		{"blue", "D2"}, {"red", "F6"}, {"blue", "E2"}, {"red", "F7"}, {"blue", "F2"}, {"red", "F8"},
+		// Sink Blue's Submarine (alternating with Blue missing)
+		{"blue", "G2"}, {"red", "H6"}, {"blue", "H2"}, {"red", "H7"}, {"blue", "I2"}, {"red", "H8"},
+		// Sink Blue's Destroyer (this should trigger game completion)
+		{"blue", "J2"}, {"red", "J9"}, {"blue", "A4"}, {"red", "J10"},
+	}
+
+	for i, attack := range finalAttacks {
+		t.Logf("Final attack %d: %s attacks %s", i+1, attack.attacker, attack.coordinate)
+
+		// Use the attack command directly to test the new game completion logic
+		attackOutput := harness.RunBattleshipCommand(t, "attack", gameID, attack.attacker, attack.coordinate)
+		
+		// Check if this attack completed the game
+		if strings.Contains(attackOutput, "GAME OVER") {
+			t.Logf("Game completed after final attack %d", i+1)
+			assert.Contains(t, attackOutput, "Red player wins", "Red should win the game")
+			break
+		}
+		
+		// If game isn't complete yet, check that status is still IN_PROGRESS
+		statusOutput = harness.RunBattleshipCommand(t, "status", gameID)
+		assert.Contains(t, statusOutput, "IN_PROGRESS", "Game should be IN_PROGRESS until all ships sunk")
+	}
+
+	// Final status check - game should now be completed
+	statusOutput = harness.RunBattleshipCommand(t, "status", gameID)
+	assert.Contains(t, statusOutput, "COMPLETED:red", "Game should be completed with red as winner")
+
+	// Verify status is persistent across multiple calls
+	statusOutput2 := harness.RunBattleshipCommand(t, "status", gameID)
+	assert.Equal(t, statusOutput, statusOutput2, "Status should be consistent across calls")
+
+	// Test with invalid game ID
+	invalidStatusOutput := harness.RunBattleshipCommand(t, "status", "invalid-game-id")
+	assert.Contains(t, invalidStatusOutput, "not found", "Should report error for invalid game ID")
+}
