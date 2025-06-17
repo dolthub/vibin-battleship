@@ -272,194 +272,98 @@ func playAIGame(player *Player) {
 	if globalPrettyPlayer == "" {
 		fmt.Printf("Starting AI player %s (%s) for game %s\n", player.Name, player.Color, player.GameID)
 	}
-	// Start the interactive battleship play command
-	cmd := exec.Command("battleship", "play", player.GameID, player.Color)
-
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		log.Printf("Error creating stdin pipe for %s: %v", player.Name, err)
+	
+	// Join the game first
+	joinCmd := exec.Command("battleship", "join", player.GameID, player.Color)
+	if err := joinCmd.Run(); err != nil {
+		log.Printf("Error joining game for %s: %v", player.Name, err)
 		return
 	}
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		log.Printf("Error creating stdout pipe for %s: %v", player.Name, err)
-		return
+	
+	if globalPrettyPlayer == "" {
+		fmt.Printf("[%s] Joined game %s\n", player.Name, player.GameID)
 	}
-
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		log.Printf("Error creating stderr pipe for %s: %v", player.Name, err)
-		return
-	}
-
-	if err := cmd.Start(); err != nil {
-		log.Printf("Error starting command for %s: %v", player.Name, err)
-		return
-	}
-
-	// Handle the interactive game
-	go handlePlayerIO(player, stdin, stdout, stderr)
-
-	if err := cmd.Wait(); err != nil {
-		if globalPrettyPlayer == "" {
-			log.Printf("AI player %s finished with error: %v", player.Name, err)
+	
+	// Place all ships
+	shipPlacements := player.Strategy.PlaceShips()
+	for _, placement := range shipPlacements {
+		orientation := "vertical"
+		if placement.IsHorizontal {
+			orientation = "horizontal"
 		}
-	} else {
-		if globalPrettyPlayer == "" {
-			fmt.Printf("AI player %s finished successfully\n", player.Name)
+		
+		placeCmd := exec.Command("battleship", "place", player.GameID, player.Color, placement.Position, orientation)
+		if err := placeCmd.Run(); err != nil {
+			log.Printf("Error placing ship for %s at %s: %v", player.Name, placement.Position, err)
+			return
 		}
+		
+		if globalPrettyPlayer == "" {
+			fmt.Printf("[%s] Placed ship at %s (%s)\n", player.Name, placement.Position, orientation)
+		}
+	}
+	
+	if globalPrettyPlayer == "" {
+		fmt.Printf("[%s] All ships placed, entering combat phase\n", player.Name)
+	}
+	
+	// Main game loop - make attacks until game ends
+	for {
+		// Check if it's our turn and game status
+		statusCmd := exec.Command("battleship", "status", player.GameID)
+		statusOutput, err := statusCmd.Output()
+		if err != nil {
+			log.Printf("Error checking status for %s: %v", player.Name, err)
+			return
+		}
+		
+		status := strings.TrimSpace(string(statusOutput))
+		
+		// Check if game is completed
+		if strings.HasPrefix(status, "COMPLETED:") {
+			if globalPrettyPlayer == "" {
+				winner := strings.TrimPrefix(status, "COMPLETED:")
+				fmt.Printf("[%s] Game completed! Winner: %s\n", player.Name, winner)
+			}
+			return
+		}
+		
+		// Check whose turn it is
+		turnCmd := exec.Command("battleship", "turn", player.GameID)
+		turnOutput, err := turnCmd.Output()
+		if err != nil {
+			log.Printf("Error checking turn for %s: %v", player.Name, err)
+			time.Sleep(1 * time.Second)
+			continue
+		}
+		
+		currentTurn := strings.TrimSpace(string(turnOutput))
+		if currentTurn != player.Color {
+			// Not our turn, wait a bit
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+		
+		// It's our turn, make an attack
+		attackPos := player.Strategy.GetNextMove("")
+		attackCmd := exec.Command("battleship", "attack", player.GameID, player.Color, attackPos)
+		attackOutput, err := attackCmd.Output()
+		if err != nil {
+			log.Printf("Error attacking for %s at %s: %v", player.Name, attackPos, err)
+			return
+		}
+		
+		if globalPrettyPlayer == "" {
+			result := strings.TrimSpace(string(attackOutput))
+			fmt.Printf("[%s] Attacked %s: %s\n", player.Name, attackPos, result)
+		}
+		
+		// Brief pause between attacks
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 
-func handlePlayerIO(player *Player, stdin io.WriteCloser, stdout, stderr io.ReadCloser) {
-	defer stdin.Close()
-	
-	// Check if we're in pretty print mode and if this is the player we want to show
-	isPrettyMode := globalPrettyPlayer != ""
-	
-	// Create a function to write and immediately sync stdin
-	writeAndFlushStdin := func(data []byte) {
-		n, err := stdin.Write(data)
-		if err != nil {
-			log.Printf("Error writing to stdin for %s: %v", player.Name, err)
-		}
-		if !isPrettyMode {
-			log.Printf("Wrote %d bytes to %s stdin: %q", n, player.Name, string(data))
-		}
-	}
-	showThisPlayer := isPrettyMode && player.Color == globalPrettyPlayer
-
-	// If this is the pretty player, use a completely different approach
-	if showThisPlayer {
-		handlePrettyPlayerIO(player, stdin, stdout, stderr)
-		return
-	}
-
-	// Read from stdout and stderr for non-pretty mode
-	go func() {
-		scanner := bufio.NewScanner(stderr)
-		for scanner.Scan() {
-			line := scanner.Text()
-			if !isPrettyMode {
-				fmt.Printf("[%s ERROR] %s\n", player.Name, line)
-			}
-		}
-	}()
-
-	reader := bufio.NewReader(stdout)
-	gameState := ""
-	shipPlacements := player.Strategy.PlaceShips()
-	shipIndex := 0
-	shipPlacementComplete := false
-	buffer := ""
-
-	for {
-		// Read in larger chunks for better performance 
-		chunk := make([]byte, 1024)
-		n, err := reader.Read(chunk)
-		if err != nil {
-			if err == io.EOF {
-				break
-			}
-			log.Printf("Error reading from %s: %v", player.Name, err)
-			return
-		}
-		if n > 0 {
-			buffer += string(chunk[:n])
-			
-			// Process complete lines in buffer
-			for strings.Contains(buffer, "\n") {
-				newlinePos := strings.Index(buffer, "\n")
-				line := strings.TrimSpace(buffer[:newlinePos])
-				buffer = buffer[newlinePos+1:]
-				if line == "" {
-					continue
-				}
-				
-				// Only show output if we're not in pretty mode, or if this is the pretty player
-				if !isPrettyMode {
-					fmt.Printf("[%s] %s\n", player.Name, line)
-				} else if showThisPlayer {
-					fmt.Println(line) // Clean output without player prefix
-				}
-				gameState += line + "\n"
-				
-				// Check if ship placement is complete
-				if strings.Contains(line, "player has completed ship placement") || strings.Contains(line, "Both players have placed ships") {
-					shipPlacementComplete = true
-				}
-				
-				// Check if we need to make an attack move
-				if strings.Contains(line, "Enter attack coordinate") || strings.Contains(line, "Your turn!") {
-					shipPlacementComplete = true // We're now in the game phase
-					move := player.Strategy.GetNextMove(gameState)
-					if !isPrettyMode {
-						fmt.Printf("[%s] Making attack: %s\n", player.Name, move)
-					}
-					writeAndFlushStdin([]byte(move + "\n"))
-				}
-					
-					// Only check for game endings during actual gameplay, not ship placement
-					if shipPlacementComplete && (strings.Contains(line, "Game Over") || strings.Contains(line, "wins!")) {
-						if !isPrettyMode {
-							fmt.Printf("[%s] Game ended - detected line: '%s'\n", player.Name, line)
-						}
-						return
-					}
-					
-					// AI should fail if any ship placement is rejected
-					if strings.Contains(line, "Please try again") {
-						if !isPrettyMode {
-							fmt.Printf("[%s] AI placement failed - terminating\n", player.Name)
-						}
-						return
-					}
-				}
-				buffer = ""
-			} else if strings.HasSuffix(buffer, ": ") || strings.HasSuffix(buffer, "): ") {
-				// This looks like a prompt - handle it
-				line := strings.TrimSpace(buffer)
-				if !isPrettyMode {
-					fmt.Printf("[%s] PROMPT: %s\n", player.Name, line)
-				} else if showThisPlayer {
-					fmt.Println(line)
-				}
-				
-				if strings.Contains(line, "Enter starting position") {
-					if shipIndex < len(shipPlacements) {
-						placement := shipPlacements[shipIndex]
-						if !isPrettyMode {
-							fmt.Printf("[%s] Placing ship at: %s\n", player.Name, placement.Position)
-						}
-						writeAndFlushStdin([]byte(placement.Position + "\n"))
-					}
-				} else if strings.Contains(line, "Place horizontally") {
-					if shipIndex < len(shipPlacements) {
-						placement := shipPlacements[shipIndex]
-						orientation := "n"
-						if placement.IsHorizontal {
-							orientation = "y"
-						}
-						if !isPrettyMode {
-							fmt.Printf("[%s] Orientation: %s\n", player.Name, orientation)
-						}
-						writeAndFlushStdin([]byte(orientation + "\n"))
-						shipIndex++
-					}
-				} else if strings.Contains(line, "Enter attack coordinate") || strings.Contains(line, "Your turn!") {
-					// Handle attack prompts
-					shipPlacementComplete = true // We're now in the game phase
-					move := player.Strategy.GetNextMove(gameState)
-					if !isPrettyMode {
-						fmt.Printf("[%s] Making attack: %s\n", player.Name, move)
-					}
-					writeAndFlushStdin([]byte(move + "\n"))
-				}
-				buffer = ""
-			}
-		}
-	}
+// Legacy I/O handling functions removed - now using simple exec commands
 
 func handlePrettyPlayerIO(player *Player, stdin io.WriteCloser, stdout, stderr io.ReadCloser) {
 	defer stdin.Close()
