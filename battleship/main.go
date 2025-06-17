@@ -172,8 +172,18 @@ func handleJoinGame(db *DB) {
 
 	if !branchExists {
 		if err := db.CreateGameBranch(gameID); err != nil {
-			fmt.Printf("Failed to create game branch: %v\n", err)
-			return
+			// Check if branch now exists (race condition - another player may have created it)
+			branchExists, checkErr := db.BranchExists(gameID)
+			if checkErr != nil {
+				fmt.Printf("Failed to check if game branch exists after creation error: %v\n", checkErr)
+				return
+			}
+			if !branchExists {
+				// Branch still doesn't exist, creation genuinely failed
+				fmt.Printf("Failed to create game branch: %v\n", err)
+				return
+			}
+			// Branch exists now, continue normally
 		}
 	}
 
@@ -639,22 +649,6 @@ func handleAttack(db *DB) {
 		targetPlayer = "red"
 	}
 
-	// Check if this coordinate has already been attacked by checking for HIT_CHAR or MISS_CHAR
-	tableName := fmt.Sprintf("%s_board", targetPlayer)
-	var existingContent string
-	checkQuery := fmt.Sprintf("SELECT content FROM %s WHERE x = ? AND y = ?", tableName)
-	err = db.conn.QueryRow(checkQuery, targetX, targetY).Scan(&existingContent)
-	if err == nil {
-		// Position exists, check if it's already been shot at
-		if existingContent == string(HIT_CHAR) || existingContent == string(MISS_CHAR) {
-			fmt.Printf("Coordinate %s has already been attacked\n", coordinate)
-			return
-		}
-	} else if err.Error() != "sql: no rows in result set" {
-		fmt.Printf("Failed to check coordinate: %v\n", err)
-		return
-	}
-
 	// Process the attack
 	result, sunkShip, err := db.ProcessAttack(player, targetX, targetY)
 	if err != nil {
@@ -789,6 +783,32 @@ func playGameLoop(db *DB, gameID, player string) {
 				result, sunkShip, err := db.ProcessAttack(player, x, y)
 				if err != nil {
 					fmt.Printf("Attack failed: %v\n", err)
+					continue
+				}
+
+				// Determine the target player for staging
+				var targetPlayer string
+				if player == "red" {
+					targetPlayer = "blue"
+				} else {
+					targetPlayer = "red"
+				}
+
+				// Stage and commit the attack on the target player's board and turn table
+				stageBoardQuery := fmt.Sprintf("CALL DOLT_ADD('%s_board')", targetPlayer)
+				if _, err := db.conn.Exec(stageBoardQuery); err != nil {
+					fmt.Printf("Failed to stage attack: %v\n", err)
+					continue
+				}
+
+				if _, err := db.conn.Exec("CALL DOLT_ADD('turn')"); err != nil {
+					fmt.Printf("Failed to stage turn update: %v\n", err)
+					continue
+				}
+
+				commitMessage := fmt.Sprintf("%s player attacked %s - %s", player, coordinate, result)
+				if err := db.CommitChanges(commitMessage); err != nil {
+					fmt.Printf("Failed to commit attack: %v\n", err)
 					continue
 				}
 

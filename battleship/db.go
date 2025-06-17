@@ -165,9 +165,17 @@ func (db *DB) CreateBoardTables() error {
 		)`
 		_, err := db.conn.Exec(redBoardQuery)
 		if err != nil {
-			return fmt.Errorf("failed to create red_board table: %w", err)
+			// Check if table now exists (race condition - another player may have created it)
+			var redTableExistsNow int
+			checkErr := db.conn.QueryRow("SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'red_board' AND TABLE_SCHEMA = DATABASE()").Scan(&redTableExistsNow)
+			if checkErr == nil && redTableExistsNow > 0 {
+				// Table exists now, continue normally
+			} else {
+				return fmt.Errorf("failed to create red_board table: %w", err)
+			}
+		} else {
+			tablesCreated = true
 		}
-		tablesCreated = true
 	}
 
 	// Create blue_board table if it doesn't exist
@@ -180,9 +188,17 @@ func (db *DB) CreateBoardTables() error {
 		)`
 		_, err := db.conn.Exec(blueBoardQuery)
 		if err != nil {
-			return fmt.Errorf("failed to create blue_board table: %w", err)
+			// Check if table now exists (race condition - another player may have created it)
+			var blueTableExistsNow int
+			checkErr := db.conn.QueryRow("SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'blue_board' AND TABLE_SCHEMA = DATABASE()").Scan(&blueTableExistsNow)
+			if checkErr == nil && blueTableExistsNow > 0 {
+				// Table exists now, continue normally
+			} else {
+				return fmt.Errorf("failed to create blue_board table: %w", err)
+			}
+		} else {
+			tablesCreated = true
 		}
-		tablesCreated = true
 	}
 
 	// Stage and commit board tables if any were created
@@ -338,38 +354,24 @@ func (db *DB) ProcessAttack(attacker, targetX string, targetY int) (string, stri
 		targetPlayer = "red"
 	}
 
-	// Check if the target position has a ship
+	// Check if the target position has already been attacked
 	tableName := fmt.Sprintf("%s_board", targetPlayer)
-	var shipChar string
-	query := fmt.Sprintf("SELECT content FROM %s WHERE x = ? AND y = ?", tableName)
-	err := db.conn.QueryRow(query, targetX, targetY).Scan(&shipChar)
+	var existingContent string
+	checkQuery := fmt.Sprintf("SELECT content FROM %s WHERE x = ? AND y = ?", tableName)
+	err := db.conn.QueryRow(checkQuery, targetX, targetY).Scan(&existingContent)
 	
-	var result string
-	var sunkShip string
-	var resultChar rune
-	if err != nil {
-		if err.Error() == "sql: no rows in result set" {
-			// No ship at this position - it's a miss
-			result = "miss"
-			resultChar = MISS_CHAR
-			// Insert miss marker into target player's board
-			insertQuery := fmt.Sprintf("INSERT INTO %s (x, y, content) VALUES (?, ?, ?)", tableName)
-			_, err = db.conn.Exec(insertQuery, targetX, targetY, string(resultChar))
-			if err != nil {
-				return "", "", fmt.Errorf("failed to record miss: %w", err)
-			}
-		} else {
-			return "", "", fmt.Errorf("failed to check target position: %w", err)
+	if err == nil {
+		// Position exists, check if it's already been shot at
+		if existingContent == string(HIT_CHAR) || existingContent == string(MISS_CHAR) {
+			return "", "", fmt.Errorf("coordinate %s%d has already been attacked", targetX, targetY)
 		}
-	} else {
+		
 		// Ship found at this position - it's a hit
-		result = "hit"
-		resultChar = HIT_CHAR
-		hitShipChar := rune(shipChar[0])
+		hitShipChar := rune(existingContent[0])
 		
 		// Update the existing ship position with hit marker
 		updateQuery := fmt.Sprintf("UPDATE %s SET content = ? WHERE x = ? AND y = ?", tableName)
-		_, err = db.conn.Exec(updateQuery, string(resultChar), targetX, targetY)
+		_, err = db.conn.Exec(updateQuery, string(HIT_CHAR), targetX, targetY)
 		if err != nil {
 			return "", "", fmt.Errorf("failed to record hit: %w", err)
 		}
@@ -383,19 +385,40 @@ func (db *DB) ProcessAttack(attacker, targetX string, targetY int) (string, stri
 		}
 		
 		// If no more pieces of this ship type remain, it's sunk
+		var sunkShip string
 		if remaining == 0 {
 			sunkShip = GetShipNameByChar(hitShipChar)
 		}
+		
+		// Increment the opponent's roll value to make it their turn
+		updateTurnQuery := "UPDATE turn SET value = value + 1 WHERE player = ?"
+		_, err = db.conn.Exec(updateTurnQuery, targetPlayer)
+		if err != nil {
+			return "", "", fmt.Errorf("failed to update turn order: %w", err)
+		}
+		
+		return "hit", sunkShip, nil
+		
+	} else if err.Error() == "sql: no rows in result set" {
+		// No ship at this position - it's a miss
+		// Insert miss marker into target player's board
+		insertQuery := fmt.Sprintf("INSERT INTO %s (x, y, content) VALUES (?, ?, ?)", tableName)
+		_, err = db.conn.Exec(insertQuery, targetX, targetY, string(MISS_CHAR))
+		if err != nil {
+			return "", "", fmt.Errorf("failed to record miss: %w", err)
+		}
+		
+		// Increment the opponent's roll value to make it their turn
+		updateTurnQuery := "UPDATE turn SET value = value + 1 WHERE player = ?"
+		_, err = db.conn.Exec(updateTurnQuery, targetPlayer)
+		if err != nil {
+			return "", "", fmt.Errorf("failed to update turn order: %w", err)
+		}
+		
+		return "miss", "", nil
+	} else {
+		return "", "", fmt.Errorf("failed to check target position: %w", err)
 	}
-
-	// Increment the opponent's roll value to make it their turn
-	updateTurnQuery := "UPDATE turn SET value = value + 1 WHERE player = ?"
-	_, err = db.conn.Exec(updateTurnQuery, targetPlayer)
-	if err != nil {
-		return "", "", fmt.Errorf("failed to update turn order: %w", err)
-	}
-
-	return result, sunkShip, nil
 }
 
 func (db *DB) GetShotsMadeBy(player string) (map[Coordinate]string, error) {
