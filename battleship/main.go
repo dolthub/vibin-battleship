@@ -56,6 +56,7 @@ func GetShipNameByChar(char rune) string {
 func clearTerminal() {
 	// ANSI escape sequence to clear screen and move cursor to top-left
 	fmt.Print("\033[2J\033[H")
+	os.Stdout.Sync()
 }
 
 func main() {
@@ -238,11 +239,13 @@ func handleJoinGame(db *DB) {
 	}
 
 	fmt.Printf("Joined game %s as %s player with value: %.9f\n", gameID, color, randomValue)
+	os.Stdout.Sync()
 
 	// Skip ship placement during testing by checking for test environment
 	if os.Getenv("BATTLESHIP_TESTING") != "true" {
 		// Start ship placement process
 		fmt.Println("\nNow place your ships on the board!")
+		os.Stdout.Sync()
 		if err := placeShipsForPlayer(db, color); err != nil {
 			fmt.Printf("Failed to place ships: %v\n", err)
 			return
@@ -260,6 +263,7 @@ func handleJoinGame(db *DB) {
 		}
 
 		fmt.Printf("\n%s player has completed ship placement!\n", color)
+		os.Stdout.Sync()
 
 		// Display the board with ships placed
 		displayPlayerBoard(db, color)
@@ -367,10 +371,12 @@ func placeShipsForPlayer(db *DB, player string) error {
 
 	for _, ship := range Ships {
 		fmt.Printf("\nPlacing %s (length %d):\n", ship.Name, ship.Length)
+		os.Stdout.Sync()
 
 		for {
 			// Get starting position
 			fmt.Printf("Enter starting position (e.g., A1): ")
+			os.Stdout.Sync()
 			var position string
 			fmt.Scanln(&position)
 
@@ -401,6 +407,7 @@ func placeShipsForPlayer(db *DB, player string) error {
 
 			// Get orientation
 			fmt.Printf("Place horizontally? (y/n): ")
+			os.Stdout.Sync()
 			var orientation string
 			fmt.Scanln(&orientation)
 
@@ -415,6 +422,7 @@ func placeShipsForPlayer(db *DB, player string) error {
 			}
 
 			fmt.Printf("%s placed successfully!\n", ship.Name)
+			os.Stdout.Sync()
 
 			// Show updated board after each ship placement
 			fmt.Printf("\nCurrent board state:\n")
@@ -451,7 +459,9 @@ func displayPlayerBoard(db *DB, player string) {
 	// Create terminal instance and display board
 	terminal := New()
 	fmt.Printf("\n%s Player's Board:\n", strings.ToUpper(player[:1])+player[1:])
+	os.Stdout.Sync()
 	terminal.PrintBoards(myShips, opponentShots, myShots, player)
+	os.Stdout.Sync()
 }
 
 func handlePrintBoard(db *DB) {
@@ -726,6 +736,7 @@ func playGameLoop(db *DB, gameID, player string) {
 
 	// Display initial board state
 	fmt.Printf("\nCurrent game state:\n")
+	os.Stdout.Sync()
 	displayPlayerBoard(db, player)
 
 	for {
@@ -763,6 +774,7 @@ func playGameLoop(db *DB, gameID, player string) {
 			// It's this player's turn - prompt for attack
 			for {
 				fmt.Printf("\n🎯 Your turn! Enter attack coordinate (e.g., A5): ")
+				os.Stdout.Sync()
 				var coordinate string
 				fmt.Scanln(&coordinate)
 
@@ -821,9 +833,11 @@ func playGameLoop(db *DB, gameID, player string) {
 				} else {
 					fmt.Printf("💦 MISS! You missed at %s\n", coordinate)
 				}
+				os.Stdout.Sync()
 
 				// Show updated board
 				fmt.Printf("\nCurrent game state:\n")
+				os.Stdout.Sync()
 				displayPlayerBoard(db, player)
 				break
 			}
@@ -831,6 +845,7 @@ func playGameLoop(db *DB, gameID, player string) {
 		} else {
 			// Wait for opponent's turn
 			fmt.Printf("Waiting for %s player's move...\n", currentTurn)
+			os.Stdout.Sync()
 
 			// Get initial table hashes
 			initialTurnHash, err := db.GetTableHash("turn")
@@ -904,6 +919,7 @@ func playGameLoop(db *DB, gameID, player string) {
 			if initialBoardHash != currentBoardHash {
 				clearTerminal()
 				fmt.Println("💥 You were attacked!")
+				os.Stdout.Sync()
 				fmt.Printf("\nCurrent game state:\n")
 				displayPlayerBoard(db, player)
 			}
