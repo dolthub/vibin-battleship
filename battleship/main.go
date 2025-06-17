@@ -98,6 +98,8 @@ func runMain(host, port, database string) {
 		handlePrintBoard(db)
 	case "attack":
 		handleAttack(db)
+	case "place":
+		handlePlace(db)
 	case "status":
 		handleStatus(db)
 	case "help":
@@ -117,6 +119,7 @@ func printUsage() {
 	fmt.Println("  battleship play <game_id> <red|blue>     - Play an interactive game")
 	fmt.Println("  battleship print <game_id> <red|blue>    - Print current board state")
 	fmt.Println("  battleship attack <game_id> <red|blue> <coordinate> - Attack a coordinate (e.g., A5)")
+	fmt.Println("  battleship place <game_id> <red|blue> <pos> <h|v> - Place a ship (AI use)")
 	fmt.Println("  battleship status <game_id>              - Show game status")
 	fmt.Println("  battleship list                          - List all games")
 	fmt.Println("  battleship help                          - Show this help")
@@ -1077,4 +1080,176 @@ func handlePlay(db *DB) {
 
 	// Continue with the game loop
 	playGameLoop(db, gameID, player)
+}
+
+func handlePlace(db *DB) {
+	if len(os.Args) < 6 {
+		fmt.Println("Usage: battleship place <game_id> <red|blue> <position> <h|v>")
+		return
+	}
+
+	gameID := os.Args[2]
+	color := os.Args[3]
+	position := os.Args[4]
+	orientation := os.Args[5]
+
+	if color != "red" && color != "blue" {
+		fmt.Println("Player color must be 'red' or 'blue'")
+		return
+	}
+
+	if orientation != "h" && orientation != "v" {
+		fmt.Println("Orientation must be 'h' (horizontal) or 'v' (vertical)")
+		return
+	}
+
+	// First check if game exists in main branch (games table)
+	var gameExists int
+	err := db.conn.QueryRow("SELECT COUNT(*) FROM games WHERE id = ?", gameID).Scan(&gameExists)
+	if err != nil {
+		fmt.Printf("Failed to check if game exists: %v\n", err)
+		return
+	}
+
+	if gameExists == 0 {
+		fmt.Printf("Game %s does not exist\n", gameID)
+		return
+	}
+
+	// Check if game branch exists, create if it doesn't
+	branchExists, err := db.BranchExists(gameID)
+	if err != nil {
+		fmt.Printf("Failed to check if game branch exists: %v\n", err)
+		return
+	}
+
+	if !branchExists {
+		if err := db.CreateGameBranch(gameID); err != nil {
+			// Check if branch now exists (race condition - another player may have created it)
+			branchExists, checkErr := db.BranchExists(gameID)
+			if checkErr != nil {
+				fmt.Printf("Failed to check if game branch exists after creation error: %v\n", checkErr)
+				return
+			}
+			if !branchExists {
+				// Branch still doesn't exist, creation genuinely failed
+				fmt.Printf("Failed to create game branch: %v\n", err)
+				return
+			}
+			// Branch exists now, continue normally
+		}
+	}
+
+	// Switch to game branch
+	if err := db.CheckoutBranch(gameID); err != nil {
+		fmt.Printf("Failed to switch to game branch: %v\n", err)
+		return
+	}
+
+	// Create turn table if it doesn't exist
+	if err := db.CreateTurnTable(); err != nil {
+		fmt.Printf("Failed to create turn table: %v\n", err)
+		return
+	}
+
+	// Create board tables if they don't exist
+	if err := db.CreateBoardTables(); err != nil {
+		fmt.Printf("Failed to create board tables: %v\n", err)
+		return
+	}
+
+	// Join the game if player hasn't joined yet
+	var playerCount int
+	err = db.conn.QueryRow("SELECT COUNT(*) FROM turn WHERE player = ?", color).Scan(&playerCount)
+	if err != nil {
+		fmt.Printf("Failed to check player status: %v\n", err)
+		return
+	}
+
+	if playerCount == 0 {
+		// Generate random value for turn order
+		randomValue := rand.Float64()
+		
+		// Insert player's turn value
+		query := `INSERT INTO turn (player, value) VALUES (?, ?) 
+				  ON DUPLICATE KEY UPDATE value = VALUES(value)`
+		_, err = db.conn.Exec(query, color, randomValue)
+		if err != nil {
+			fmt.Printf("Failed to insert turn value: %v\n", err)
+			return
+		}
+
+		// Stage and commit player's roll
+		if _, err := db.conn.Exec("CALL DOLT_ADD('turn')"); err != nil {
+			fmt.Printf("Failed to stage player roll: %v\n", err)
+			return
+		}
+
+		commitMessage := fmt.Sprintf("Player %s rolled %.9f", color, randomValue)
+		if _, err := db.conn.Exec(fmt.Sprintf("CALL DOLT_COMMIT('-m', '%s')", commitMessage)); err != nil {
+			fmt.Printf("Failed to commit player roll: %v\n", err)
+			return
+		}
+	}
+
+	// Find next ship to place for this player
+	var shipsPlaced int
+	err = db.conn.QueryRow(fmt.Sprintf("SELECT COUNT(DISTINCT content) FROM %s_board WHERE content != ' '", color)).Scan(&shipsPlaced)
+	if err != nil {
+		fmt.Printf("Failed to count placed ships: %v\n", err)
+		return
+	}
+
+	if shipsPlaced >= len(Ships) {
+		fmt.Printf("All ships already placed for %s player\n", color)
+		return
+	}
+
+	ship := Ships[shipsPlaced]
+	isHorizontal := orientation == "h"
+
+	// Parse position
+	if len(position) < 2 {
+		fmt.Printf("Invalid position format: %s\n", position)
+		return
+	}
+
+	startX := string(position[0])
+	startY := 0
+
+	// Parse Y coordinate properly
+	if _, err := fmt.Sscanf(position[1:], "%d", &startY); err != nil {
+		fmt.Printf("Invalid Y coordinate in position %s\n", position)
+		return
+	}
+
+	// Validate coordinates
+	if startX < "A" || startX > "J" {
+		fmt.Printf("Invalid X coordinate. Please use letters A-J.\n")
+		return
+	}
+
+	if startY < 1 || startY > 10 {
+		fmt.Printf("Invalid Y coordinate. Please use numbers 1-10.\n")
+		return
+	}
+
+	// Place the ship
+	if err := db.PlaceShip(color, ship.Char, startX, startY, isHorizontal, ship.Length); err != nil {
+		fmt.Printf("Failed to place ship: %v\n", err)
+		return
+	}
+
+	// Commit ship placement
+	if _, err := db.conn.Exec(fmt.Sprintf("CALL DOLT_ADD('%s_board')", color)); err != nil {
+		fmt.Printf("Failed to stage ship placement: %v\n", err)
+		return
+	}
+
+	if _, err := db.conn.Exec(fmt.Sprintf("CALL DOLT_COMMIT('-m', '%s player placed %s at %s')", color, ship.Name, position)); err != nil {
+		fmt.Printf("Failed to commit ship placement: %v\n", err)
+		return
+	}
+
+	fmt.Printf("Placed %s at %s (%s)\n", ship.Name, position, map[bool]string{true: "horizontal", false: "vertical"}[isHorizontal])
 }

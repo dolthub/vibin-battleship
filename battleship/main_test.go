@@ -1314,3 +1314,121 @@ func TestPlayCommandSkipsShipPlacementWhenAlreadyPlaced(t *testing.T) {
 		t.Fatal("Play command test timed out")
 	}
 }
+
+func TestPlaceCommand(t *testing.T) {
+	harness := NewTestHarness(t)
+	defer harness.Cleanup()
+
+	// Create a new game first
+	newOutput := harness.RunBattleshipCommand(t, "new")
+	gameID := extractGameID(t, newOutput)
+
+	// Test with invalid arguments
+	output := harness.RunBattleshipCommand(t, "place")
+	assert.Contains(t, output, "Usage: battleship place", "Expected usage message for no args")
+
+	output = harness.RunBattleshipCommand(t, "place", gameID)
+	assert.Contains(t, output, "Usage: battleship place", "Expected usage message for insufficient args")
+
+	output = harness.RunBattleshipCommand(t, "place", gameID, "red")
+	assert.Contains(t, output, "Usage: battleship place", "Expected usage message for insufficient args")
+
+	output = harness.RunBattleshipCommand(t, "place", gameID, "red", "A1")
+	assert.Contains(t, output, "Usage: battleship place", "Expected usage message for insufficient args")
+
+	// Test with invalid color
+	output = harness.RunBattleshipCommand(t, "place", gameID, "yellow", "A1", "h")
+	assert.Contains(t, output, "must be 'red' or 'blue'", "Expected error for invalid color")
+
+	// Test with invalid orientation
+	output = harness.RunBattleshipCommand(t, "place", gameID, "red", "A1", "x")
+	assert.Contains(t, output, "must be 'h' (horizontal) or 'v' (vertical)", "Expected error for invalid orientation")
+
+	// Test with non-existent game
+	output = harness.RunBattleshipCommand(t, "place", "non-existent-game", "red", "A1", "h")
+	assert.Contains(t, output, "does not exist", "Expected error for non-existent game")
+
+	// Test real-world scenario: game exists but no branch created yet
+	// This is the key test case that was failing - place command should create branch automatically
+	output = harness.RunBattleshipCommand(t, "place", gameID, "red", "A1", "h")
+	assert.Contains(t, output, "Placed", "Place command should work on fresh game without existing branch")
+	assert.Contains(t, output, "Carrier", "Expected carrier to be placed first")
+
+	// Verify that the game branch was automatically created
+	branchExists, err := harness.DB.BranchExists(gameID)
+	require.NoError(t, err, "Failed to check if branch exists")
+	assert.True(t, branchExists, "Game branch should have been created automatically")
+
+	// Continue placing more ships on the now-established game
+	output = harness.RunBattleshipCommand(t, "place", gameID, "red", "A3", "h")
+	assert.Contains(t, output, "Placed", "Should place second ship")
+	assert.Contains(t, output, "Battleship", "Expected battleship to be placed second")
+
+	// Continue placing remaining ships
+	remainingTestCases := []struct {
+		position    string
+		orientation string
+		shipName    string
+		description string
+	}{
+		{"F1", "v", "Cruiser", "Place third ship vertically at F1"},
+		{"H1", "v", "Submarine", "Place fourth ship vertically at H1"},
+		{"J5", "v", "Destroyer", "Place fifth ship vertically at J5"},
+	}
+
+	for _, tc := range remainingTestCases {
+		t.Logf("Test case: %s", tc.description)
+		output := harness.RunBattleshipCommand(t, "place", gameID, "red", tc.position, tc.orientation)
+		assert.Contains(t, output, "Placed", "Expected success message for %s", tc.description)
+		assert.Contains(t, output, tc.shipName, "Expected %s in output for %s", tc.shipName, tc.description)
+	}
+
+	// Test attempting to place ship when all ships are already placed
+	output = harness.RunBattleshipCommand(t, "place", gameID, "red", "A10", "h")
+	assert.Contains(t, output, "All ships already placed", "Expected error when all ships are placed")
+
+	// Test position format validation with a new game
+	newOutput2 := harness.RunBattleshipCommand(t, "new")
+	gameID2 := extractGameID(t, newOutput2)
+
+	output = harness.RunBattleshipCommand(t, "place", gameID2, "blue", "Z1", "h")
+	assert.Contains(t, output, "Invalid X coordinate", "Expected error for invalid X coordinate")
+
+	output = harness.RunBattleshipCommand(t, "place", gameID2, "blue", "A0", "h")
+	assert.Contains(t, output, "Invalid Y coordinate", "Expected error for Y coordinate too low")
+
+	output = harness.RunBattleshipCommand(t, "place", gameID2, "blue", "A11", "h")
+	assert.Contains(t, output, "Invalid Y coordinate", "Expected error for Y coordinate too high")
+
+	output = harness.RunBattleshipCommand(t, "place", gameID2, "blue", "Ax", "h")
+	assert.Contains(t, output, "Invalid Y coordinate", "Expected error for non-numeric Y coordinate")
+
+	output = harness.RunBattleshipCommand(t, "place", gameID2, "blue", "A", "h")
+	assert.Contains(t, output, "Invalid position format", "Expected error for too short position")
+
+	// Test valid multi-digit positions
+	output = harness.RunBattleshipCommand(t, "place", gameID2, "blue", "A10", "h")
+	assert.Contains(t, output, "Placed", "Should accept valid position A10")
+
+	// Verify board state after placement - switch to the first game
+	err = harness.DB.CheckoutBranch(gameID)
+	require.NoError(t, err, "Failed to checkout first game branch")
+
+	board, err := harness.DB.GetBoardState("red")
+	require.NoError(t, err, "Failed to get red board state")
+
+	// Check that all red ships were placed correctly
+	assert.Equal(t, string(CARRIER_CHAR), board["A"][1], "Carrier should be at A1")
+	assert.Equal(t, string(BATTLESHIP_CHAR), board["A"][3], "Battleship should be at A3")
+	assert.Equal(t, string(CRUISER_CHAR), board["F"][1], "Cruiser should be at F1")
+	assert.Equal(t, string(SUBMARINE_CHAR), board["H"][1], "Submarine should be at H1")
+	assert.Equal(t, string(DESTROYER_CHAR), board["J"][5], "Destroyer should be at J5")
+
+	// Verify blue board from second game has one ship at A10
+	err = harness.DB.CheckoutBranch(gameID2)
+	require.NoError(t, err, "Failed to checkout second game branch")
+
+	blueBoard, err := harness.DB.GetBoardState("blue")
+	require.NoError(t, err, "Failed to get blue board state")
+	assert.Equal(t, string(CARRIER_CHAR), blueBoard["A"][10], "Blue carrier should be at A10")
+}
