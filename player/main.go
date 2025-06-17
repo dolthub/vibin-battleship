@@ -55,6 +55,7 @@ func main() {
 		GameID:   gameID,
 		Strategy: createStrategy(*redPlayerType),
 	}
+	player1.Strategy.SetPlayerColor("red")
 
 	player2 := &Player{
 		Name:     getPlayerName("blue", *bluePlayerType),
@@ -62,6 +63,7 @@ func main() {
 		GameID:   gameID,
 		Strategy: createStrategy(*bluePlayerType),
 	}
+	player2.Strategy.SetPlayerColor("blue")
 
 	// Start only AI players in goroutines
 	var wg sync.WaitGroup

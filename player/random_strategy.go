@@ -6,7 +6,9 @@ import (
 	"time"
 )
 
-type RandomStrategy struct{}
+type RandomStrategy struct{
+	playerColor string
+}
 
 func (r *RandomStrategy) GetNextMove(gameState string) string {
 	rows := "ABCDEFGHIJ"
@@ -156,5 +158,9 @@ func getShipPositions(position string, horizontal bool, length int) []string {
 	}
 	
 	return positions
+}
+
+func (r *RandomStrategy) SetPlayerColor(color string) {
+	r.playerColor = color
 }
 

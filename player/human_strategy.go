@@ -1,6 +1,8 @@
 package main
 
-type HumanStrategy struct{}
+type HumanStrategy struct{
+	playerColor string
+}
 
 func (h *HumanStrategy) GetNextMove(gameState string) string {
 	panic("HumanStrategy.GetNextMove should never be called - human players connect directly")
@@ -8,4 +10,8 @@ func (h *HumanStrategy) GetNextMove(gameState string) string {
 
 func (h *HumanStrategy) PlaceShips() []ShipPlacement {
 	panic("HumanStrategy.PlaceShips should never be called - human players connect directly")
+}
+
+func (h *HumanStrategy) SetPlayerColor(color string) {
+	h.playerColor = color
 }

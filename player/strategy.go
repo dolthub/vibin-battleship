@@ -8,4 +8,5 @@ type ShipPlacement struct {
 type PlayerStrategy interface {
 	GetNextMove(gameState string) string
 	PlaceShips() []ShipPlacement
+	SetPlayerColor(color string)
 }
