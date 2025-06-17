@@ -697,6 +697,23 @@ func handleAttack(db *DB) {
 		fmt.Printf("💦 MISS! %s player missed at %s\n", strings.ToUpper(player[:1])+player[1:], coordinate)
 	}
 
+	// Check if game is complete after this attack
+	gameComplete, winner, err := db.CheckGameComplete(gameID)
+	if err != nil {
+		fmt.Printf("Failed to check game completion: %v\n", err)
+		return
+	}
+
+	if gameComplete {
+		// Complete the game automatically
+		if err := db.CompleteGame(gameID, winner); err != nil {
+			fmt.Printf("Failed to complete game: %v\n", err)
+			return
+		}
+		fmt.Printf("🎉 GAME OVER! %s player wins!\n", strings.ToUpper(winner[:1])+winner[1:])
+		return
+	}
+
 	// Determine next player
 	nextTurn, err := db.GetCurrentTurn(gameID)
 	if err != nil {
