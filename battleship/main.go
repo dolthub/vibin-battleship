@@ -171,6 +171,8 @@ func runMain(host, port, database string) {
 		handleStatus(db)
 	case "waitforturn":
 		handleWaitForTurn(db)
+	case "replay":
+		handleReplay(db)
 	case "help":
 		printUsage()
 	default:
@@ -191,6 +193,7 @@ func printUsage() {
 	fmt.Println("  battleship place <game_id> <red|blue> <pos> <h|v> - Place a ship (AI use)")
 	fmt.Println("  battleship status <game_id>              - Show game status")
 	fmt.Println("  battleship waitforturn <game_id> <red|blue> - Wait until it's the specified player's turn")
+	fmt.Println("  battleship replay <game_id>              - Replay game history showing both boards")
 	fmt.Println("  battleship list                          - List all games")
 	fmt.Println("  battleship help                          - Show this help")
 }
@@ -1357,4 +1360,116 @@ func handlePlace(db *DB) {
 	}
 
 	fmt.Printf("Placed %s at %s (%s)\n", ship.Name, position, map[bool]string{true: "horizontal", false: "vertical"}[isHorizontal])
+}
+
+func handleReplay(db *DB) {
+	if len(os.Args) < 3 {
+		fmt.Println("Usage: battleship replay <game_id>")
+		return
+	}
+
+	gameID := os.Args[2]
+
+	// Check if game exists
+	var gameExists int
+	err := db.conn.QueryRow("SELECT COUNT(*) FROM games WHERE id = ?", gameID).Scan(&gameExists)
+	if err != nil {
+		fmt.Printf("Failed to check if game exists: %v\n", err)
+		return
+	}
+
+	if gameExists == 0 {
+		fmt.Printf("Game %s does not exist\n", gameID)
+		return
+	}
+
+	// Check if game branch exists
+	branchExists, err := db.BranchExists(gameID)
+	if err != nil {
+		fmt.Printf("Failed to check if game branch exists: %v\n", err)
+		return
+	}
+
+	if !branchExists {
+		fmt.Printf("Game %s exists but no game history available (no players joined)\n", gameID)
+		return
+	}
+
+	// Get game history
+	history, err := db.GetGameHistory(gameID)
+	if err != nil {
+		fmt.Printf("Failed to get game history: %v\n", err)
+		return
+	}
+
+	if len(history) == 0 {
+		fmt.Printf("No history available for game %s\n", gameID)
+		return
+	}
+
+	// Create terminal instance for display
+	terminal := New()
+	
+	fmt.Printf("Replaying game %s\n", gameID)
+	fmt.Printf("Found %d commits in game history\n\n", len(history))
+	
+	// If too many commits, ask for skip option
+	skip := 1
+	if len(history) > 100 {
+		fmt.Printf("This game has %d commits. You can step through each one or skip by a larger increment.\n", len(history))
+		fmt.Print("Enter skip amount (1 for each commit, 10 to show every 10th, etc.) [default: 10]: ")
+		var input string
+		fmt.Scanln(&input)
+		if input != "" {
+			if skipVal, err := strconv.Atoi(input); err == nil && skipVal > 0 {
+				skip = skipVal
+			}
+		} else {
+			skip = 10
+		}
+		fmt.Printf("Showing every %d commits\n\n", skip)
+	}
+	
+	fmt.Println("Press Enter to advance, 'q' to quit, or number + Enter to jump to that step")
+
+	// Walk through history with skip
+	for i := 0; i < len(history); i += skip {
+		entry := history[i]
+		fmt.Printf("\n--- Step %d/%d ---\n", i+1, len(history))
+		fmt.Printf("Time: %s\n", entry.Timestamp)
+		
+		// Get board state at this commit
+		boardStates, err := db.GetBoardStateAtCommit(gameID, entry.CommitHash)
+		if err != nil {
+			fmt.Printf("Failed to get board state at commit %s: %v\n", entry.CommitHash, err)
+			continue
+		}
+
+		// Display both boards side by side
+		terminal.PrintReplayBoards(boardStates["red"], boardStates["blue"], entry.Message)
+
+		// Wait for user input to continue (except for the last entry)
+		if i+skip < len(history) {
+			var input string
+			fmt.Print("Continue (Enter), quit (q), or jump to step number: ")
+			fmt.Scanln(&input)
+			
+			input = strings.ToLower(strings.TrimSpace(input))
+			if input == "q" {
+				fmt.Println("Replay ended by user")
+				return
+			}
+			
+			// Check if user wants to jump to a specific step
+			if input != "" {
+				if jumpTo, err := strconv.Atoi(input); err == nil && jumpTo > 0 && jumpTo <= len(history) {
+					i = jumpTo - 2 // -2 because loop will add skip
+					skip = 1 // Switch to single step mode after jump
+				}
+			}
+			clearTerminal()
+		}
+	}
+
+	fmt.Println("\n=== Replay Complete ===")
 }

@@ -142,3 +142,70 @@ func (t *Terminal) PrintBoards(myShips, opponentShots, myShots map[Coordinate]st
 		fmt.Fprintf(t.output, "   %s   %s%s\n", strings.Repeat("-", 20), spaceWidth, strings.Repeat("-", 20))
 	}
 }
+
+// PrintReplayBoards displays both players' boards side by side for replay view
+func (t *Terminal) PrintReplayBoards(redBoard, blueBoard map[Coordinate]string, message string) {
+	spaceWidth := strings.Repeat(" ", 10)
+
+	// Print the commit message/action
+	if message != "" {
+		fmt.Fprintf(t.output, "%s=== %s ===%s\n\n", Yellow, message, Reset)
+	}
+
+	// Print board labels
+	fmt.Fprintf(t.output, "%sRed Player's Board%s%s%sBlue Player's Board%s\n", 
+		Red, Reset, spaceWidth, Blue, Reset)
+
+	// Print column headers for both boards
+	fmt.Fprintf(t.output, "   ")
+	for col := 'A'; col <= 'J'; col++ {
+		fmt.Fprintf(t.output, "%c ", col)
+	}
+	fmt.Fprintf(t.output, "             ")
+	for col := 'A'; col <= 'J'; col++ {
+		fmt.Fprintf(t.output, "%c ", col)
+	}
+	fmt.Fprintln(t.output)
+
+	// Print top borders
+	fmt.Fprintf(t.output, "   %s%s   %s\n", strings.Repeat("-", 20), spaceWidth, strings.Repeat("-", 20))
+
+	// Print rows for both boards
+	for row := 0; row < 10; row++ {
+		// Print red player's board
+		fmt.Fprintf(t.output, "%2d|", row+1)
+		for col := 0; col < 10; col++ {
+			coord := Coordinate{X: col, Y: row}
+			t.printCell(redBoard[coord])
+		}
+
+		// Print separator between boards
+		fmt.Fprintf(t.output, spaceWidth)
+
+		// Print blue player's board
+		fmt.Fprintf(t.output, "%2d|", row+1)
+		for col := 0; col < 10; col++ {
+			coord := Coordinate{X: col, Y: row}
+			t.printCell(blueBoard[coord])
+		}
+		fmt.Fprintln(t.output)
+	}
+
+	// Print bottom borders
+	fmt.Fprintf(t.output, "   %s%s   %s\n", strings.Repeat("-", 20), spaceWidth, strings.Repeat("-", 20))
+	fmt.Fprintln(t.output)
+}
+
+// printCell prints a single cell with appropriate formatting
+func (t *Terminal) printCell(content string) {
+	switch content {
+	case string(HIT_CHAR):
+		fmt.Fprintf(t.output, "%s●%s|", Red, Reset) // Hit (red)
+	case string(MISS_CHAR):
+		fmt.Fprintf(t.output, "%s●%s|", Blue, Reset) // Miss (blue)
+	case string(CARRIER_CHAR), string(BATTLESHIP_CHAR), string(CRUISER_CHAR), string(SUBMARINE_CHAR), string(DESTROYER_CHAR):
+		fmt.Fprintf(t.output, "%s■%s|", Green, Reset) // Ship (green)
+	default:
+		fmt.Fprintf(t.output, " |") // Empty
+	}
+}

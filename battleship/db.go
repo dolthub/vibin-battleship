@@ -13,7 +13,7 @@ type DB struct {
 
 func NewDB(host, port, user, password, database string) (*DB, error) {
 	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true", user, password, host, port, database)
-	
+
 	conn, err := sql.Open("mysql", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database connection: %w", err)
@@ -83,7 +83,7 @@ func (db *DB) MergeBranch(branch, targetBranch string) error {
 	if err := db.CheckoutBranch(targetBranch); err != nil {
 		return err
 	}
-	
+
 	query := fmt.Sprintf("CALL DOLT_MERGE('%s', '--no-ff')", branch)
 	_, err := db.conn.Exec(query)
 	if err != nil {
@@ -143,7 +143,7 @@ func (db *DB) CreateBoardTables() error {
 	if err != nil {
 		return fmt.Errorf("failed to check if red_board table exists: %w", err)
 	}
-	
+
 	err = db.conn.QueryRow("SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_NAME = 'blue_board' AND TABLE_SCHEMA = DATABASE()").Scan(&blueTableExists)
 	if err != nil {
 		return fmt.Errorf("failed to check if blue_board table exists: %w", err)
@@ -215,13 +215,15 @@ func (db *DB) CreateBoardTables() error {
 	return nil
 }
 
-
 func (db *DB) PlaceShip(player string, shipChar rune, startX string, startY int, isHorizontal bool, length int) error {
 	tableName := fmt.Sprintf("%s_board", player)
-	
+
 	// Validate ship placement positions
-	positions := []struct{ x string; y int }{}
-	
+	positions := []struct {
+		x string
+		y int
+	}{}
+
 	if isHorizontal {
 		// Place horizontally
 		for i := 0; i < length; i++ {
@@ -230,7 +232,10 @@ func (db *DB) PlaceShip(player string, shipChar rune, startX string, startY int,
 				return fmt.Errorf("ship extends beyond right edge of board")
 			}
 			newX := string(rune('A' + xIndex))
-			positions = append(positions, struct{ x string; y int }{newX, startY})
+			positions = append(positions, struct {
+				x string
+				y int
+			}{newX, startY})
 		}
 	} else {
 		// Place vertically
@@ -239,10 +244,13 @@ func (db *DB) PlaceShip(player string, shipChar rune, startX string, startY int,
 			if newY > 10 {
 				return fmt.Errorf("ship extends beyond bottom edge of board")
 			}
-			positions = append(positions, struct{ x string; y int }{startX, newY})
+			positions = append(positions, struct {
+				x string
+				y int
+			}{startX, newY})
 		}
 	}
-	
+
 	// Check for conflicts with existing ships
 	for _, pos := range positions {
 		var currentContent string
@@ -258,7 +266,7 @@ func (db *DB) PlaceShip(player string, shipChar rune, startX string, startY int,
 		// If we found a row, position is occupied
 		return fmt.Errorf("position %s%d is already occupied", pos.x, pos.y)
 	}
-	
+
 	// Place the ship
 	for _, pos := range positions {
 		query := fmt.Sprintf("INSERT INTO %s (x, y, content) VALUES (?, ?, ?)", tableName)
@@ -267,42 +275,42 @@ func (db *DB) PlaceShip(player string, shipChar rune, startX string, startY int,
 			return fmt.Errorf("failed to place ship at position %s%d: %w", pos.x, pos.y, err)
 		}
 	}
-	
+
 	return nil
 }
 
 func (db *DB) GetBoardState(player string) (map[string]map[int]string, error) {
 	tableName := fmt.Sprintf("%s_board", player)
-	
+
 	rows, err := db.conn.Query(fmt.Sprintf("SELECT x, y, content FROM %s", tableName))
 	if err != nil {
 		return nil, fmt.Errorf("failed to query %s board: %w", player, err)
 	}
 	defer rows.Close()
-	
+
 	board := make(map[string]map[int]string)
-	
+
 	for rows.Next() {
 		var x, content string
 		var y int
-		
+
 		err := rows.Scan(&x, &y, &content)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan board position: %w", err)
 		}
-		
+
 		if board[x] == nil {
 			board[x] = make(map[int]string)
 		}
 		board[x][y] = content
 	}
-	
+
 	return board, nil
 }
 
 func (db *DB) GetBoardForDisplay(player string) (map[Coordinate]string, error) {
 	tableName := fmt.Sprintf("%s_board", player)
-	
+
 	// Only get actual ship positions, exclude hit/miss markers
 	query := fmt.Sprintf("SELECT x, y, content FROM %s WHERE content NOT IN (' ', ?, ?)", tableName)
 	rows, err := db.conn.Query(query, string(HIT_CHAR), string(MISS_CHAR))
@@ -310,26 +318,26 @@ func (db *DB) GetBoardForDisplay(player string) (map[Coordinate]string, error) {
 		return nil, fmt.Errorf("failed to query %s board: %w", player, err)
 	}
 	defer rows.Close()
-	
+
 	board := make(map[Coordinate]string)
-	
+
 	for rows.Next() {
 		var x, content string
 		var y int
-		
+
 		err := rows.Scan(&x, &y, &content)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan board position: %w", err)
 		}
-		
+
 		// Convert our A-J, 1-10 format to 0-9, 0-9 format for terminal display
 		xIndex := int(x[0] - 'A')
 		yIndex := y - 1
-		
+
 		coord := Coordinate{X: xIndex, Y: yIndex}
 		board[coord] = "S" // Mark as ship for display
 	}
-	
+
 	return board, nil
 }
 
@@ -343,7 +351,6 @@ func (db *DB) GetCurrentTurn(gameID string) (string, error) {
 
 	return currentPlayer, nil
 }
-
 
 func (db *DB) ProcessAttack(attacker, targetX string, targetY int) (string, string, error) {
 	// Determine the target player (opponent of attacker)
@@ -359,23 +366,23 @@ func (db *DB) ProcessAttack(attacker, targetX string, targetY int) (string, stri
 	var existingContent string
 	checkQuery := fmt.Sprintf("SELECT content FROM %s WHERE x = ? AND y = ?", tableName)
 	err := db.conn.QueryRow(checkQuery, targetX, targetY).Scan(&existingContent)
-	
+
 	if err == nil {
 		// Position exists, check if it's already been shot at
 		if existingContent == string(HIT_CHAR) || existingContent == string(MISS_CHAR) {
 			return "", "", fmt.Errorf("coordinate %s%d has already been attacked", targetX, targetY)
 		}
-		
+
 		// Ship found at this position - it's a hit
 		hitShipChar := rune(existingContent[0])
-		
+
 		// Update the existing ship position with hit marker
 		updateQuery := fmt.Sprintf("UPDATE %s SET content = ? WHERE x = ? AND y = ?", tableName)
 		_, err = db.conn.Exec(updateQuery, string(HIT_CHAR), targetX, targetY)
 		if err != nil {
 			return "", "", fmt.Errorf("failed to record hit: %w", err)
 		}
-		
+
 		// Check if this was the last piece of this ship type
 		remainingQuery := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE content = ?", tableName)
 		var remaining int
@@ -383,22 +390,22 @@ func (db *DB) ProcessAttack(attacker, targetX string, targetY int) (string, stri
 		if err != nil {
 			return "", "", fmt.Errorf("failed to check remaining ship pieces: %w", err)
 		}
-		
+
 		// If no more pieces of this ship type remain, it's sunk
 		var sunkShip string
 		if remaining == 0 {
 			sunkShip = GetShipNameByChar(hitShipChar)
 		}
-		
+
 		// Increment the opponent's roll value to make it their turn
 		updateTurnQuery := "UPDATE turn SET value = value + 1 WHERE player = ?"
 		_, err = db.conn.Exec(updateTurnQuery, targetPlayer)
 		if err != nil {
 			return "", "", fmt.Errorf("failed to update turn order: %w", err)
 		}
-		
+
 		return "hit", sunkShip, nil
-		
+
 	} else if err.Error() == "sql: no rows in result set" {
 		// No ship at this position - it's a miss
 		// Insert miss marker into target player's board
@@ -407,14 +414,14 @@ func (db *DB) ProcessAttack(attacker, targetX string, targetY int) (string, stri
 		if err != nil {
 			return "", "", fmt.Errorf("failed to record miss: %w", err)
 		}
-		
+
 		// Increment the opponent's roll value to make it their turn
 		updateTurnQuery := "UPDATE turn SET value = value + 1 WHERE player = ?"
 		_, err = db.conn.Exec(updateTurnQuery, targetPlayer)
 		if err != nil {
 			return "", "", fmt.Errorf("failed to update turn order: %w", err)
 		}
-		
+
 		return "miss", "", nil
 	} else {
 		return "", "", fmt.Errorf("failed to check target position: %w", err)
@@ -431,7 +438,7 @@ func (db *DB) GetShotsMadeBy(player string) (map[Coordinate]string, error) {
 	}
 
 	tableName := fmt.Sprintf("%s_board", opponentPlayer)
-	
+
 	// Get all HIT_CHAR and MISS_CHAR entries from opponent's board (these are shots made by this player)
 	query := fmt.Sprintf("SELECT x, y, content FROM %s WHERE content IN (?, ?)", tableName)
 	rows, err := db.conn.Query(query, string(HIT_CHAR), string(MISS_CHAR))
@@ -439,22 +446,22 @@ func (db *DB) GetShotsMadeBy(player string) (map[Coordinate]string, error) {
 		return nil, fmt.Errorf("failed to query shots made by %s: %w", player, err)
 	}
 	defer rows.Close()
-	
+
 	shots := make(map[Coordinate]string)
-	
+
 	for rows.Next() {
 		var x, content string
 		var y int
-		
+
 		err := rows.Scan(&x, &y, &content)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan shot position: %w", err)
 		}
-		
+
 		// Convert our A-J, 1-10 format to 0-9, 0-9 format for terminal display
 		xIndex := int(x[0] - 'A')
 		yIndex := y - 1
-		
+
 		coord := Coordinate{X: xIndex, Y: yIndex}
 		if content == string(HIT_CHAR) {
 			shots[coord] = "H" // Hit
@@ -462,36 +469,36 @@ func (db *DB) GetShotsMadeBy(player string) (map[Coordinate]string, error) {
 			shots[coord] = "M" // Miss
 		}
 	}
-	
+
 	return shots, nil
 }
 
 func (db *DB) GetShotsAgainst(player string) (map[Coordinate]string, error) {
 	// Get all HIT_CHAR and MISS_CHAR entries from this player's board (these are shots made by opponent)
 	tableName := fmt.Sprintf("%s_board", player)
-	
+
 	query := fmt.Sprintf("SELECT x, y, content FROM %s WHERE content IN (?, ?)", tableName)
 	rows, err := db.conn.Query(query, string(HIT_CHAR), string(MISS_CHAR))
 	if err != nil {
 		return nil, fmt.Errorf("failed to query shots against %s: %w", player, err)
 	}
 	defer rows.Close()
-	
+
 	shots := make(map[Coordinate]string)
-	
+
 	for rows.Next() {
 		var x, content string
 		var y int
-		
+
 		err := rows.Scan(&x, &y, &content)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan shot position: %w", err)
 		}
-		
+
 		// Convert our A-J, 1-10 format to 0-9, 0-9 format for terminal display
 		xIndex := int(x[0] - 'A')
 		yIndex := y - 1
-		
+
 		coord := Coordinate{X: xIndex, Y: yIndex}
 		if content == string(HIT_CHAR) {
 			shots[coord] = "H" // Hit
@@ -499,7 +506,7 @@ func (db *DB) GetShotsAgainst(player string) (map[Coordinate]string, error) {
 			shots[coord] = "M" // Miss
 		}
 	}
-	
+
 	return shots, nil
 }
 
@@ -508,43 +515,205 @@ func (db *DB) CheckGameComplete(gameID string) (bool, string, error) {
 	if err := db.CheckoutBranch(gameID); err != nil {
 		return false, "", fmt.Errorf("failed to checkout game branch: %w", err)
 	}
-	
+
 	// First check if both players have placed ships
 	bothPlaced, err := db.BothPlayersPlacedShips()
 	if err != nil {
 		return false, "", fmt.Errorf("failed to check if both players placed ships: %w", err)
 	}
-	
+
 	// Game is not complete if both players haven't placed ships yet
 	if !bothPlaced {
 		return false, "", nil
 	}
-	
+
 	// Count remaining ships for each player (not hit)
 	var redShipsRemaining, blueShipsRemaining int
-	
+
 	// Count red's remaining ships (ship characters that aren't HIT_CHAR)
 	redQuery := "SELECT COUNT(*) FROM red_board WHERE content NOT IN (' ', ?, ?)"
 	err = db.conn.QueryRow(redQuery, string(HIT_CHAR), string(MISS_CHAR)).Scan(&redShipsRemaining)
 	if err != nil {
 		return false, "", fmt.Errorf("failed to count red ships: %w", err)
 	}
-	
+
 	// Count blue's remaining ships (ship characters that aren't HIT_CHAR)
 	blueQuery := "SELECT COUNT(*) FROM blue_board WHERE content NOT IN (' ', ?, ?)"
 	err = db.conn.QueryRow(blueQuery, string(HIT_CHAR), string(MISS_CHAR)).Scan(&blueShipsRemaining)
 	if err != nil {
 		return false, "", fmt.Errorf("failed to count blue ships: %w", err)
 	}
-	
+
 	// Game is complete if either player has no ships remaining
 	if redShipsRemaining == 0 {
 		return true, "blue", nil // Blue wins
 	} else if blueShipsRemaining == 0 {
 		return true, "red", nil // Red wins
 	}
-	
+
 	return false, "", nil // Game continues
+}
+
+// GameHistoryEntry represents a single commit in the game history
+type GameHistoryEntry struct {
+	CommitHash string
+	Message    string
+	Timestamp  string
+}
+
+// GetGameHistory returns the commit history for a game branch, filtered to only show gameplay commits
+func (db *DB) GetGameHistory(gameID string) ([]GameHistoryEntry, error) {
+	// First find the commit range for this game using merge base approach
+	gameStartCommit, gameEndCommit, err := db.getGameCommitRange(gameID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get game commit range: %w", err)
+	}
+
+	// Switch to main branch to query the commit range
+	if err := db.CheckoutBranch("main"); err != nil {
+		return nil, fmt.Errorf("failed to checkout main branch: %w", err)
+	}
+
+	// Get commits in the range from game start to game end (using ^2 to get the game branch tip, not the merge commit)
+	query := fmt.Sprintf("SELECT commit_hash, message, date FROM DOLT_LOG('%s..%s^2') ORDER BY date ASC", gameStartCommit, gameEndCommit)
+	rows, err := db.conn.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query game history with range %s..%s: %w", gameStartCommit, gameEndCommit, err)
+	}
+	defer rows.Close()
+
+	var history []GameHistoryEntry
+	for rows.Next() {
+		var entry GameHistoryEntry
+		err := rows.Scan(&entry.CommitHash, &entry.Message, &entry.Timestamp)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan history entry: %w", err)
+		}
+		history = append(history, entry)
+	}
+
+	return history, nil
+}
+
+// getGameCommitRange finds the start and end commits for a game using merge base
+func (db *DB) getGameCommitRange(gameID string) (string, string, error) {
+	// Step 1: Find the commit on main where the game was finalized
+	// Switch to main branch first
+	if err := db.CheckoutBranch("main"); err != nil {
+		return "", "", fmt.Errorf("failed to checkout main branch: %w", err)
+	}
+
+	// Find the merge commit that brought this game into main
+	query := `
+		SELECT commit_hash 
+		FROM DOLT_LOG 
+		WHERE message LIKE ? 
+		ORDER BY date DESC 
+		LIMIT 1
+	`
+	mergeBranchPattern := fmt.Sprintf("%%Merge branch '%s'%%", gameID)
+	var gameEndCommit string
+	err := db.conn.QueryRow(query, mergeBranchPattern).Scan(&gameEndCommit)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to find game merge commit: %w", err)
+	}
+
+	// Step 2: Try to get the two parents of that commit using dolt_hashof
+	var parent1, parent2 string
+	err = db.conn.QueryRow("SELECT dolt_hashof(?)", gameEndCommit+"^1").Scan(&parent1)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to get first parent of commit %s: %w", gameEndCommit, err)
+	}
+
+	// Try to get the second parent - if this fails, it's not a merge commit
+	err = db.conn.QueryRow("SELECT dolt_hashof(?)", gameEndCommit+"^2").Scan(&parent2)
+	if err != nil {
+		// Not a merge commit, fall back to simpler approach
+		// Look for the commit that created the turn table for this game
+		return db.getGameCommitRangeFallback(gameID, gameEndCommit)
+	}
+
+	// Step 3: Call dolt_merge_base on the two parents
+	mergeBaseQuery := "SELECT DOLT_MERGE_BASE(?, ?)"
+	var gameStartCommit string
+	err = db.conn.QueryRow(mergeBaseQuery, parent1, parent2).Scan(&gameStartCommit)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to find merge base of parents %s and %s: %w", parent1, parent2, err)
+	}
+
+	return gameStartCommit, gameEndCommit, nil
+}
+
+// getGameCommitRangeFallback provides a simpler approach when merge base doesn't work
+func (db *DB) getGameCommitRangeFallback(gameID, gameEndCommit string) (string, string, error) {
+	// Switch to the game branch to get the history
+	if err := db.CheckoutBranch(gameID); err != nil {
+		return "", "", fmt.Errorf("failed to checkout game branch: %w", err)
+	}
+
+	// Find the commit that created the turn table (beginning of actual gameplay)
+	query := `
+		SELECT commit_hash 
+		FROM DOLT_LOG 
+		WHERE message LIKE '%Create turn table%' 
+		ORDER BY date ASC 
+		LIMIT 1
+	`
+	var gameStartCommit string
+	err := db.conn.QueryRow(query).Scan(&gameStartCommit)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to find game start commit: %w", err)
+	}
+
+	return gameStartCommit, gameEndCommit, nil
+}
+
+// GetBoardStateAtCommit returns the board state for both players at a specific commit
+func (db *DB) GetBoardStateAtCommit(gameID, commitHash string) (map[string]map[Coordinate]string, error) {
+	// Switch to the game branch
+	if err := db.CheckoutBranch(gameID); err != nil {
+		return nil, fmt.Errorf("failed to checkout game branch: %w", err)
+	}
+
+	result := make(map[string]map[Coordinate]string)
+
+	// Get both players' board states using AS OF syntax
+	for _, player := range []string{"red", "blue"} {
+		tableName := fmt.Sprintf("%s_board", player)
+
+		// Use AS OF to query table at specific commit
+		query := fmt.Sprintf("SELECT x, y, content FROM %s AS OF '%s' WHERE content != ' '", tableName, commitHash)
+		rows, err := db.conn.Query(query)
+		if err != nil {
+			// If query fails, the table might not exist yet at this commit, so use empty board
+			result[player] = make(map[Coordinate]string)
+			continue
+		}
+
+		board := make(map[Coordinate]string)
+		for rows.Next() {
+			var x, content string
+			var y int
+
+			err := rows.Scan(&x, &y, &content)
+			if err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("failed to scan board position: %w", err)
+			}
+
+			// Convert our A-J, 1-10 format to 0-9, 0-9 format for terminal display
+			xIndex := int(x[0] - 'A')
+			yIndex := y - 1
+
+			coord := Coordinate{X: xIndex, Y: yIndex}
+			board[coord] = content
+		}
+		rows.Close()
+
+		result[player] = board
+	}
+
+	return result, nil
 }
 
 func (db *DB) CheckGameCompleteFromMain(gameID string) (bool, string, error) {
@@ -555,12 +724,12 @@ func (db *DB) CheckGameCompleteFromMain(gameID string) (bool, string, error) {
 	if err != nil {
 		return false, "", fmt.Errorf("failed to get current branch: %w", err)
 	}
-	
+
 	// Switch to main branch to check games table
 	if err := db.CheckoutBranch("main"); err != nil {
 		return false, "", fmt.Errorf("failed to checkout main branch: %w", err)
 	}
-	
+
 	// Check if game has a winner recorded
 	var winner string
 	err = db.conn.QueryRow("SELECT winner FROM games WHERE id = ?", gameID).Scan(&winner)
@@ -572,51 +741,51 @@ func (db *DB) CheckGameCompleteFromMain(gameID string) (bool, string, error) {
 		}
 		return false, "", fmt.Errorf("failed to check game completion: %w", err)
 	}
-	
+
 	// Restore original branch
 	if err := db.CheckoutBranch(currentBranch); err != nil {
 		return false, "", fmt.Errorf("failed to restore branch %s: %w", currentBranch, err)
 	}
-	
+
 	// Game is complete if winner is not empty
 	if winner != "" {
 		return true, winner, nil
 	}
-	
+
 	return false, "", nil
 }
 
 func (db *DB) CompleteGame(gameID, winner string) error {
 	// Count total shots made by each player
 	var redShots, blueShots int
-	
+
 	// Red's shots are hits/misses on blue's board
 	err := db.conn.QueryRow("SELECT COUNT(*) FROM blue_board WHERE content IN (?, ?)", string(HIT_CHAR), string(MISS_CHAR)).Scan(&redShots)
 	if err != nil {
 		return fmt.Errorf("failed to count red shots: %w", err)
 	}
-	
+
 	// Blue's shots are hits/misses on red's board
 	err = db.conn.QueryRow("SELECT COUNT(*) FROM red_board WHERE content IN (?, ?)", string(HIT_CHAR), string(MISS_CHAR)).Scan(&blueShots)
 	if err != nil {
 		return fmt.Errorf("failed to count blue shots: %w", err)
 	}
-	
+
 	// Count hits made by each player
 	var redHits, blueHits int
-	
+
 	// Red's hits are HIT_CHAR marks on blue's board
 	err = db.conn.QueryRow("SELECT COUNT(*) FROM blue_board WHERE content = ?", string(HIT_CHAR)).Scan(&redHits)
 	if err != nil {
 		return fmt.Errorf("failed to count red hits: %w", err)
 	}
-	
+
 	// Blue's hits are HIT_CHAR marks on red's board
 	err = db.conn.QueryRow("SELECT COUNT(*) FROM red_board WHERE content = ?", string(HIT_CHAR)).Scan(&blueHits)
 	if err != nil {
 		return fmt.Errorf("failed to count blue hits: %w", err)
 	}
-	
+
 	// Update the games table with results on the game branch
 	updateQuery := `UPDATE games SET 
 		winner = ?, 
@@ -630,17 +799,17 @@ func (db *DB) CompleteGame(gameID, winner string) error {
 	if err != nil {
 		return fmt.Errorf("failed to update games table: %w", err)
 	}
-	
+
 	// Stage and commit the game completion on game branch
 	if _, err := db.conn.Exec("CALL DOLT_ADD('games')"); err != nil {
 		return fmt.Errorf("failed to stage game completion: %w", err)
 	}
-	
+
 	gameCompletionMsg := fmt.Sprintf("Game %s completed - %s wins (%d/%d vs %d/%d shots/hits)", gameID, winner, redShots, redHits, blueShots, blueHits)
 	if err := db.CommitChanges(gameCompletionMsg); err != nil {
 		return fmt.Errorf("failed to commit game completion: %w", err)
 	}
-	
+
 	// Drop temporary tables before merging to main
 	tables := []string{"turn", "red_board", "blue_board"}
 	for _, table := range tables {
@@ -649,12 +818,12 @@ func (db *DB) CompleteGame(gameID, winner string) error {
 			return fmt.Errorf("failed to drop table %s: %w", table, err)
 		}
 	}
-	
+
 	// Stage and commit the table drops
 	if _, err := db.conn.Exec("CALL DOLT_ADD('.')"); err != nil {
 		return fmt.Errorf("failed to stage table drops: %w", err)
 	}
-	
+
 	dropCommitMsg := fmt.Sprintf("Drop temporary tables for game %s", gameID)
 	if err := db.CommitChanges(dropCommitMsg); err != nil {
 		return fmt.Errorf("failed to commit table drops: %w", err)
@@ -664,19 +833,19 @@ func (db *DB) CompleteGame(gameID, winner string) error {
 	if err := db.CheckoutBranch("main"); err != nil {
 		return fmt.Errorf("failed to checkout main branch: %w", err)
 	}
-	
+
 	// Merge the game branch into main using DOLT_MERGE
 	mergeQuery := fmt.Sprintf("CALL DOLT_MERGE('%s', '--no-ff')", gameID)
 	if _, err := db.conn.Exec(mergeQuery); err != nil {
 		return fmt.Errorf("failed to merge game branch %s into main: %w", gameID, err)
 	}
-	
+
 	// Skip deleting the game branch to avoid conflicts when multiple sessions are active
 	// deleteBranchQuery := fmt.Sprintf("CALL DOLT_BRANCH('-d', '%s')", gameID)
 	// if _, err := db.conn.Exec(deleteBranchQuery); err != nil {
 	//	return fmt.Errorf("failed to delete game branch %s: %w", gameID, err)
 	// }
-	
+
 	return nil
 }
 
@@ -702,19 +871,19 @@ func (db *DB) BothPlayersJoined() (bool, error) {
 func (db *DB) BothPlayersPlacedShips() (bool, error) {
 	// Check if both players have ships on their boards
 	var redShips, blueShips int
-	
+
 	// Count positions that contain either ship characters OR hit markers
 	// Hit markers (X) indicate where ships were originally placed
 	err := db.conn.QueryRow("SELECT COUNT(*) FROM red_board WHERE content != ?", string(MISS_CHAR)).Scan(&redShips)
 	if err != nil {
 		return false, fmt.Errorf("failed to count red ships: %w", err)
 	}
-	
+
 	err = db.conn.QueryRow("SELECT COUNT(*) FROM blue_board WHERE content != ?", string(MISS_CHAR)).Scan(&blueShips)
 	if err != nil {
 		return false, fmt.Errorf("failed to count blue ships: %w", err)
 	}
-	
+
 	// Both players should have 17 total ship squares (5+4+3+3+2)
 	// This includes both intact ships and hit markers
 	return redShips == 17 && blueShips == 17, nil
@@ -723,7 +892,7 @@ func (db *DB) BothPlayersPlacedShips() (bool, error) {
 func (db *DB) PlayerHasPlacedShips(player string) (bool, error) {
 	tableName := fmt.Sprintf("%s_board", player)
 	var shipCount int
-	
+
 	// Count positions that contain either ship characters OR hit markers
 	// Hit markers (X) indicate where ships were originally placed
 	query := fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE content != ?", tableName)
@@ -731,7 +900,7 @@ func (db *DB) PlayerHasPlacedShips(player string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("failed to count %s ships: %w", player, err)
 	}
-	
+
 	// Player should have 17 total ship squares (5+4+3+3+2)
 	// This includes both intact ships and hit markers
 	return shipCount == 17, nil
