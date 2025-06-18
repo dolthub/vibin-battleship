@@ -59,6 +59,73 @@ func clearTerminal() {
 	os.Stdout.Sync()
 }
 
+func handleWaitForTurn(db *DB) {
+	if len(os.Args) < 4 {
+		fmt.Println("Usage: battleship waitforturn <game_id> <red|blue>")
+		return
+	}
+
+	gameID := os.Args[2]
+	player := os.Args[3]
+
+	if player != "red" && player != "blue" {
+		fmt.Println("Player color must be 'red' or 'blue'")
+		return
+	}
+
+	// Check if game exists
+	var gameExists int
+	err := db.conn.QueryRow("SELECT COUNT(*) FROM games WHERE id = ?", gameID).Scan(&gameExists)
+	if err != nil {
+		fmt.Printf("Failed to check if game exists: %v\n", err)
+		return
+	}
+
+	if gameExists == 0 {
+		fmt.Printf("Game %s does not exist\n", gameID)
+		return
+	}
+
+	// Switch to game branch
+	if err := db.CheckoutBranch(gameID); err != nil {
+		fmt.Printf("Failed to checkout game branch: %v\n", err)
+		return
+	}
+	defer db.CheckoutBranch("main")
+
+	// Poll until it's the specified player's turn
+	for {
+		// Check if game is completed - first check main branch for recorded winner
+		isCompleted, _, err := db.CheckGameCompleteFromMain(gameID)
+		if err != nil {
+			// If main branch check fails, fall back to game state check
+			isCompleted, _, err = db.CheckGameComplete(gameID)
+			if err != nil {
+				fmt.Printf("Failed to check if game is complete: %v\n", err)
+				return
+			}
+		}
+		if isCompleted {
+			return // Game is over, exit
+		}
+
+		// Check current turn
+		currentTurn, err := db.GetCurrentTurn("")
+		if err != nil {
+			// Wait a bit and try again - turn table might not exist yet
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+
+		if currentTurn == player {
+			return // It's our turn, exit successfully
+		}
+
+		// Not our turn yet, wait and check again
+		time.Sleep(500 * time.Millisecond)
+	}
+}
+
 func main() {
 	runMain("127.0.0.1", "3306", "battleship")
 }
@@ -102,6 +169,8 @@ func runMain(host, port, database string) {
 		handlePlace(db)
 	case "status":
 		handleStatus(db)
+	case "waitforturn":
+		handleWaitForTurn(db)
 	case "help":
 		printUsage()
 	default:
@@ -121,6 +190,7 @@ func printUsage() {
 	fmt.Println("  battleship attack <game_id> <red|blue> <coordinate> - Attack a coordinate (e.g., A5)")
 	fmt.Println("  battleship place <game_id> <red|blue> <pos> <h|v> - Place a ship (AI use)")
 	fmt.Println("  battleship status <game_id>              - Show game status")
+	fmt.Println("  battleship waitforturn <game_id> <red|blue> - Wait until it's the specified player's turn")
 	fmt.Println("  battleship list                          - List all games")
 	fmt.Println("  battleship help                          - Show this help")
 }

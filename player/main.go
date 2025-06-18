@@ -121,19 +121,12 @@ func main() {
 		}
 		playAIvsAIGame(player1, player2)
 	} else if len(aiPlayers) == 1 {
-		// AI vs Human - start AI and wait for human
+		// AI vs Human - wait for human to connect first, then start AI
 		if prettyPlayer == "" {
-			fmt.Printf("🤖 Starting AI player and waiting for human...\n")
+			fmt.Printf("🤖 Waiting for human player to connect before starting AI...\n")
 		}
 		
-		// Start AI player
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			playAIGame(aiPlayers[0])
-		}()
-
-		// Wait for human players to join
+		// Wait for human players to join FIRST
 		for _, humanPlayer := range humanPlayers {
 			if prettyPlayer == "" {
 				fmt.Printf("⏳ Waiting for %s player to connect...\n", humanPlayer.Color)
@@ -143,6 +136,16 @@ func main() {
 				fmt.Printf("✅ %s player connected!\n", humanPlayer.Color)
 			}
 		}
+
+		// NOW start AI player after human has connected
+		if prettyPlayer == "" {
+			fmt.Printf("🤖 Starting AI player %s...\n", aiPlayers[0].Name)
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			playAIGame(aiPlayers[0])
+		}()
 
 		// Wait for AI player to complete
 		wg.Wait()
@@ -450,6 +453,9 @@ func playAIGame(player *Player) {
 	}
 	
 	// Main game loop - make attacks until game ends
+	maxConsecutiveFailures := 10 // Limit consecutive failed attacks to prevent infinite loops
+	consecutiveFailures := 0
+	
 	for {
 		// Check if it's our turn and game status
 		statusCmd := exec.Command("battleship", "status", player.GameID)
@@ -470,17 +476,45 @@ func playAIGame(player *Player) {
 			return
 		}
 		
-		// For now, just try to attack - the battleship command will handle turn logic
-		// TODO: Update battleship status command to include turn information
+		// Check if game is still in setup phase (not IN_PROGRESS yet)
+		if status != "IN_PROGRESS" {
+			// Game is not ready for combat yet, wait for both players to finish placing ships
+			time.Sleep(1000 * time.Millisecond)
+			continue
+		}
 		
-		// It's our turn, make an attack
+		// Game is in progress, wait for our turn using the new waitforturn command
+		waitCmd := exec.Command("battleship", "waitforturn", player.GameID, player.Color)
+		err = waitCmd.Run()
+		if err != nil {
+			// If waitforturn failed, the game might be over
+			log.Printf("Wait for turn failed for %s: %v", player.Name, err)
+			return
+		}
+		
+		// It's our turn, get a move and attack
 		attackPos := player.Strategy.GetNextMove("")
 		attackCmd := exec.Command("battleship", "attack", player.GameID, player.Color, attackPos)
 		attackOutput, err := attackCmd.Output()
 		if err != nil {
+			// If the coordinate was already attacked, just try again with the same player
+			if strings.Contains(err.Error(), "already been attacked") {
+				consecutiveFailures++
+				if consecutiveFailures >= maxConsecutiveFailures {
+					if globalPrettyPlayer == "" {
+						fmt.Printf("⚠️  [%s] Too many consecutive failed attacks, checking game status...\n", player.Name)
+					}
+					break // Exit loop and check game status
+				}
+				// Silently try again - no need to log this noise
+				continue
+			}
 			log.Printf("Error attacking for %s at %s: %v", player.Name, attackPos, err)
 			return
 		}
+		
+		// Reset consecutive failures on successful attack
+		consecutiveFailures = 0
 		
 		if globalPrettyPlayer == "" {
 			result := strings.TrimSpace(string(attackOutput))

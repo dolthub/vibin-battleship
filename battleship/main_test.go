@@ -1772,3 +1772,140 @@ func TestStatusCommandThroughGameLifecycle(t *testing.T) {
 	invalidStatusOutput := harness.RunBattleshipCommand(t, "status", "invalid-game-id")
 	assert.Contains(t, invalidStatusOutput, "not found", "Should report error for invalid game ID")
 }
+
+func TestWaitForTurnBasicUsage(t *testing.T) {
+	harness := NewTestHarness(t)
+	defer harness.Cleanup()
+
+	// Test invalid usage
+	invalidOutput := harness.RunBattleshipCommand(t, "waitforturn")
+	assert.Contains(t, invalidOutput, "Usage: battleship waitforturn <game_id> <red|blue>", "Should show usage for no args")
+
+	invalidOutput = harness.RunBattleshipCommand(t, "waitforturn", "game-id")
+	assert.Contains(t, invalidOutput, "Usage: battleship waitforturn <game_id> <red|blue>", "Should show usage for missing player")
+
+	invalidOutput = harness.RunBattleshipCommand(t, "waitforturn", "game-id", "invalid-color")
+	assert.Contains(t, invalidOutput, "Player color must be 'red' or 'blue'", "Should reject invalid color")
+
+	// Test with non-existent game
+	invalidOutput = harness.RunBattleshipCommand(t, "waitforturn", "non-existent-game", "red")
+	assert.Contains(t, invalidOutput, "does not exist", "Should report non-existent game")
+}
+
+func TestWaitForTurnWithActiveGame(t *testing.T) {
+	harness := NewTestHarness(t)
+	defer harness.Cleanup()
+
+	// Create a new game and join players to set up turn order
+	newOutput := harness.RunBattleshipCommand(t, "new")
+	gameID := extractGameID(t, newOutput)
+
+	// Have both players join
+	harness.RunBattleshipCommand(t, "join", gameID, "red")
+	harness.RunBattleshipCommand(t, "join", gameID, "blue")
+
+	// Place ships for both players to get game to IN_PROGRESS state
+	harness.RunBattleshipCommand(t, "place", gameID, "red", "A1", "h")
+	harness.RunBattleshipCommand(t, "place", gameID, "red", "B1", "h")
+	harness.RunBattleshipCommand(t, "place", gameID, "red", "C1", "h")
+	harness.RunBattleshipCommand(t, "place", gameID, "red", "D1", "h")
+	harness.RunBattleshipCommand(t, "place", gameID, "red", "E1", "h")
+
+	harness.RunBattleshipCommand(t, "place", gameID, "blue", "F6", "h")
+	harness.RunBattleshipCommand(t, "place", gameID, "blue", "A8", "h")
+	harness.RunBattleshipCommand(t, "place", gameID, "blue", "F8", "h")
+	harness.RunBattleshipCommand(t, "place", gameID, "blue", "A10", "h")
+	harness.RunBattleshipCommand(t, "place", gameID, "blue", "J9", "v")
+
+	// Check current turn to know who goes first
+	statusOutput := harness.RunBattleshipCommand(t, "status", gameID)
+	assert.Contains(t, statusOutput, "IN_PROGRESS", "Game should be in progress")
+
+	// Get the current turn by checking who can attack
+	err := harness.DB.CheckoutBranch(gameID)
+	require.NoError(t, err, "Failed to checkout game branch")
+
+	currentTurn, err := harness.DB.GetCurrentTurn("")
+	require.NoError(t, err, "Failed to get current turn")
+
+	// Test waitforturn for the current player (should return immediately)
+	waitOutput := harness.RunBattleshipCommand(t, "waitforturn", gameID, currentTurn)
+	assert.Empty(t, waitOutput, "waitforturn should return immediately for current player")
+
+	// Test waitforturn for the non-current player in a goroutine (should block)
+	otherPlayer := "blue"
+	if currentTurn == "blue" {
+		otherPlayer = "red"
+	}
+
+	// Channel to track if waitforturn completed
+	done := make(chan bool, 1)
+	go func() {
+		harness.RunBattleshipCommand(t, "waitforturn", gameID, otherPlayer)
+		done <- true
+	}()
+
+	// Wait a bit to ensure waitforturn is blocking
+	select {
+	case <-done:
+		t.Fatal("waitforturn should have blocked for non-current player")
+	case <-time.After(500 * time.Millisecond):
+		// Good, it's blocking as expected
+	}
+
+	// Make an attack to change turns
+	harness.RunBattleshipCommand(t, "attack", gameID, currentTurn, "J1") // Should miss
+
+	// Now waitforturn should complete
+	select {
+	case <-done:
+		// Good, waitforturn completed after turn change
+	case <-time.After(2 * time.Second):
+		t.Fatal("waitforturn should have completed after turn change")
+	}
+}
+
+func TestWaitForTurnWithCompletedGame(t *testing.T) {
+	harness := NewTestHarness(t)
+	defer harness.Cleanup()
+
+	// Create a new game and set it up
+	newOutput := harness.RunBattleshipCommand(t, "new")
+	gameID := extractGameID(t, newOutput)
+
+	// Join both players
+	harness.RunBattleshipCommand(t, "join", gameID, "red")
+	harness.RunBattleshipCommand(t, "join", gameID, "blue")
+
+	// Place ships for both players
+	harness.RunBattleshipCommand(t, "place", gameID, "red", "A1", "h")
+	harness.RunBattleshipCommand(t, "place", gameID, "red", "B1", "h")
+	harness.RunBattleshipCommand(t, "place", gameID, "red", "C1", "h")
+	harness.RunBattleshipCommand(t, "place", gameID, "red", "D1", "h")
+	harness.RunBattleshipCommand(t, "place", gameID, "red", "E1", "h")
+
+	harness.RunBattleshipCommand(t, "place", gameID, "blue", "F6", "h")
+	harness.RunBattleshipCommand(t, "place", gameID, "blue", "A8", "h")
+	harness.RunBattleshipCommand(t, "place", gameID, "blue", "F8", "h")
+	harness.RunBattleshipCommand(t, "place", gameID, "blue", "A10", "h")
+	harness.RunBattleshipCommand(t, "place", gameID, "blue", "J9", "v")
+
+	// Complete the game by sinking all of one player's ships
+	// (This is a simplified completion - in reality we'd need to sink all ships)
+	err := harness.DB.CheckoutBranch(gameID)
+	require.NoError(t, err, "Failed to checkout game branch")
+
+	// Manually set game as completed by updating the games table
+	err = harness.DB.CheckoutBranch("main")
+	require.NoError(t, err, "Failed to checkout main branch")
+
+	_, err = harness.DB.conn.Exec("UPDATE games SET winner = ? WHERE id = ?", "red", gameID)
+	require.NoError(t, err, "Failed to update game winner")
+
+	// Test waitforturn on completed game (should return immediately)
+	waitOutput := harness.RunBattleshipCommand(t, "waitforturn", gameID, "red")
+	assert.Empty(t, waitOutput, "waitforturn should return immediately for completed game")
+
+	waitOutput = harness.RunBattleshipCommand(t, "waitforturn", gameID, "blue")
+	assert.Empty(t, waitOutput, "waitforturn should return immediately for completed game")
+}
