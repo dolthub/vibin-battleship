@@ -170,7 +170,7 @@ func main() {
 }
 
 func isValidPlayerType(playerType string) bool {
-	return playerType == "random" || playerType == "human" || playerType == "test" || playerType == "claude-1" || playerType == "claude-2" || playerType == "claude-3" || playerType == "claude-4"
+	return playerType == "random" || playerType == "human" || playerType == "test" || playerType == "claude-1" || playerType == "claude-2" || playerType == "claude-3" || playerType == "claude-4" || playerType == "claude-5"
 }
 
 // parseAttackResult parses the output from a battleship attack command and returns hit status and sunk ship type
@@ -213,6 +213,8 @@ func getPlayerName(color, playerType string) string {
 		return fmt.Sprintf("Claude3_%s", color)
 	} else if playerType == "claude-4" {
 		return fmt.Sprintf("Claude4_%s", color)
+	} else if playerType == "claude-5" {
+		return fmt.Sprintf("Claude5_%s", color)
 	}
 	return fmt.Sprintf("RandomBot_%s", color)
 }
@@ -233,6 +235,8 @@ func createStrategy(playerType string) PlayerStrategy {
 		return &Claude3Strategy{}
 	case "claude-4":
 		return &Claude4Strategy{}
+	case "claude-5":
+		return &Claude5Strategy{}
 	default:
 		log.Fatalf("Unknown player type: %s", playerType)
 		return nil
@@ -417,10 +421,6 @@ func playAIvsAIGame(player1, player2 *Player) {
 		// Parse attack result and update player state
 		result := strings.TrimSpace(string(attackOutput))
 		currentPlayer.LastMoveHit, currentPlayer.SunkShipType = parseAttackResult(result)
-
-		// Clear sunk ship type for other player since it's only relevant for the player who made the move
-		otherPlayer.SunkShipType = ""
-		otherPlayer.LastMoveHit = false
 
 		if globalPrettyPlayer == "" {
 			fmt.Printf("[%s] Attacked %s: %s\n", currentPlayer.Name, attackPos, result)
