@@ -170,7 +170,7 @@ func main() {
 }
 
 func isValidPlayerType(playerType string) bool {
-	return playerType == "random" || playerType == "human" || playerType == "test" || playerType == "claude-1"
+	return playerType == "random" || playerType == "human" || playerType == "test" || playerType == "claude-1" || playerType == "claude-2"
 }
 
 func getPlayerName(color, playerType string) string {
@@ -180,6 +180,8 @@ func getPlayerName(color, playerType string) string {
 		return fmt.Sprintf("TestBot_%s", color)
 	} else if playerType == "claude-1" {
 		return fmt.Sprintf("Claude1_%s", color)
+	} else if playerType == "claude-2" {
+		return fmt.Sprintf("Claude2_%s", color)
 	}
 	return fmt.Sprintf("RandomBot_%s", color)
 }
@@ -194,6 +196,8 @@ func createStrategy(playerType string) PlayerStrategy {
 		return &TestStrategy{attackIndex: 0}
 	case "claude-1":
 		return &ClaudeStrategy{}
+	case "claude-2":
+		return &Claude2Strategy{}
 	default:
 		log.Fatalf("Unknown player type: %s", playerType)
 		return nil
