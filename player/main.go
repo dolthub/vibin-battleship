@@ -15,10 +15,12 @@ import (
 var globalPrettyPlayer string // Global variable to track which player to show clean output for
 
 type Player struct {
-	Name     string
-	Color    string
-	GameID   string
-	Strategy PlayerStrategy
+	Name         string
+	Color        string
+	GameID       string
+	Strategy     PlayerStrategy
+	LastMoveHit  bool   // Whether the last move was a hit
+	SunkShipType string // Type of ship sunk on last move (empty if none)
 }
 
 func main() {
@@ -169,6 +171,33 @@ func main() {
 
 func isValidPlayerType(playerType string) bool {
 	return playerType == "random" || playerType == "human" || playerType == "test" || playerType == "claude-1" || playerType == "claude-2" || playerType == "claude-3" || playerType == "claude-4"
+}
+
+// parseAttackResult parses the output from a battleship attack command and returns hit status and sunk ship type
+func parseAttackResult(attackOutput string) (bool, string) {
+	output := strings.ToLower(strings.TrimSpace(attackOutput))
+
+	// Check for hit (🎯 HIT! or 💥 You sunk)
+	isHit := strings.Contains(output, "hit") || strings.Contains(output, "sunk")
+
+	// Check for sunk ship
+	sunkShipType := ""
+	if strings.Contains(output, "sunk") {
+		// Look for ship types in the output
+		if strings.Contains(output, "carrier") {
+			sunkShipType = "Carrier"
+		} else if strings.Contains(output, "battleship") {
+			sunkShipType = "Battleship"
+		} else if strings.Contains(output, "cruiser") {
+			sunkShipType = "Cruiser"
+		} else if strings.Contains(output, "submarine") {
+			sunkShipType = "Submarine"
+		} else if strings.Contains(output, "destroyer") {
+			sunkShipType = "Destroyer"
+		}
+	}
+
+	return isHit, sunkShipType
 }
 
 func getPlayerName(color, playerType string) string {
@@ -352,8 +381,8 @@ func playAIvsAIGame(player1, player2 *Player) {
 	consecutiveFailures := 0
 
 	for {
-		// Make attack with current player
-		attackPos := currentPlayer.Strategy.GetNextMove("", false, "")
+		// Make attack with current player using previous move results
+		attackPos := currentPlayer.Strategy.GetNextMove("", currentPlayer.LastMoveHit, currentPlayer.SunkShipType)
 		attackCmd := exec.Command("battleship", "attack", currentPlayer.GameID, currentPlayer.Color, attackPos)
 		attackOutput, err := attackCmd.Output()
 
@@ -385,8 +414,15 @@ func playAIvsAIGame(player1, player2 *Player) {
 		// Reset consecutive failures on successful attack
 		consecutiveFailures = 0
 
+		// Parse attack result and update player state
+		result := strings.TrimSpace(string(attackOutput))
+		currentPlayer.LastMoveHit, currentPlayer.SunkShipType = parseAttackResult(result)
+
+		// Clear sunk ship type for other player since it's only relevant for the player who made the move
+		otherPlayer.SunkShipType = ""
+		otherPlayer.LastMoveHit = false
+
 		if globalPrettyPlayer == "" {
-			result := strings.TrimSpace(string(attackOutput))
 			fmt.Printf("[%s] Attacked %s: %s\n", currentPlayer.Name, attackPos, result)
 		}
 
@@ -502,8 +538,8 @@ func playAIGame(player *Player) {
 			return
 		}
 
-		// It's our turn, get a move and attack
-		attackPos := player.Strategy.GetNextMove("", false, "")
+		// It's our turn, get a move and attack using previous move results
+		attackPos := player.Strategy.GetNextMove("", player.LastMoveHit, player.SunkShipType)
 		attackCmd := exec.Command("battleship", "attack", player.GameID, player.Color, attackPos)
 		attackOutput, err := attackCmd.Output()
 		if err != nil {
@@ -526,8 +562,11 @@ func playAIGame(player *Player) {
 		// Reset consecutive failures on successful attack
 		consecutiveFailures = 0
 
+		// Parse attack result and update player state
+		result := strings.TrimSpace(string(attackOutput))
+		player.LastMoveHit, player.SunkShipType = parseAttackResult(result)
+
 		if globalPrettyPlayer == "" {
-			result := strings.TrimSpace(string(attackOutput))
 			fmt.Printf("[%s] Attacked %s: %s\n", player.Name, attackPos, result)
 		}
 
