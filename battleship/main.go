@@ -193,7 +193,7 @@ func printUsage() {
 	fmt.Println("  battleship place <game_id> <red|blue> <pos> <h|v> - Place a ship (AI use)")
 	fmt.Println("  battleship status <game_id>              - Show game status")
 	fmt.Println("  battleship waitforturn <game_id> <red|blue> - Wait until it's the specified player's turn")
-	fmt.Println("  battleship replay <game_id>              - Replay game history showing both boards")
+	fmt.Println("  battleship replay <game_id> [--auto] [--delay=<ms>] - Replay game history showing both boards")
 	fmt.Println("  battleship list                          - List all games")
 	fmt.Println("  battleship help                          - Show this help")
 }
@@ -1364,11 +1364,26 @@ func handlePlace(db *DB) {
 
 func handleReplay(db *DB) {
 	if len(os.Args) < 3 {
-		fmt.Println("Usage: battleship replay <game_id>")
+		fmt.Println("Usage: battleship replay <game_id> [--auto] [--delay=<ms>]")
 		return
 	}
 
 	gameID := os.Args[2]
+	
+	// Parse optional flags
+	autoMode := false
+	delayMs := 1000 // Default 1 second delay in auto mode
+	
+	for i := 3; i < len(os.Args); i++ {
+		arg := os.Args[i]
+		if arg == "--auto" {
+			autoMode = true
+		} else if strings.HasPrefix(arg, "--delay=") {
+			if delayVal, err := strconv.Atoi(arg[8:]); err == nil && delayVal >= 0 {
+				delayMs = delayVal
+			}
+		}
+	}
 
 	// Check if game exists
 	var gameExists int
@@ -1411,26 +1426,34 @@ func handleReplay(db *DB) {
 	terminal := New()
 	
 	fmt.Printf("Replaying game %s\n", gameID)
-	fmt.Printf("Found %d commits in game history\n\n", len(history))
+	fmt.Printf("Found %d commits in game history\n", len(history))
 	
-	// If too many commits, ask for skip option
+	// Handle skip options and mode setup
 	skip := 1
-	if len(history) > 100 {
-		fmt.Printf("This game has %d commits. You can step through each one or skip by a larger increment.\n", len(history))
-		fmt.Print("Enter skip amount (1 for each commit, 10 to show every 10th, etc.) [default: 10]: ")
-		var input string
-		fmt.Scanln(&input)
-		if input != "" {
-			if skipVal, err := strconv.Atoi(input); err == nil && skipVal > 0 {
-				skip = skipVal
+	if autoMode {
+		fmt.Printf("Auto-replay mode enabled with %dms delay between moves\n", delayMs)
+		fmt.Printf("Showing each move step by step (%d total moves)\n", len(history))
+		fmt.Println()
+	} else {
+		// Interactive mode - ask for skip option if many commits
+		if len(history) > 100 {
+			fmt.Printf("This game has %d commits. You can step through each one or skip by a larger increment.\n", len(history))
+			fmt.Print("Enter skip amount (1 for each commit, 10 to show every 10th, etc.) [default: 1]: ")
+			var input string
+			fmt.Scanln(&input)
+			if input != "" {
+				if skipVal, err := strconv.Atoi(input); err == nil && skipVal > 0 {
+					skip = skipVal
+				}
+			} else {
+				skip = 1
 			}
-		} else {
-			skip = 10
+			if skip > 1 {
+				fmt.Printf("Showing every %d commits\n\n", skip)
+			}
 		}
-		fmt.Printf("Showing every %d commits\n\n", skip)
+		fmt.Println("Press Enter to advance, 'q' to quit, or number + Enter to jump to that step")
 	}
-	
-	fmt.Println("Press Enter to advance, 'q' to quit, or number + Enter to jump to that step")
 
 	// Walk through history with skip
 	for i := 0; i < len(history); i += skip {
@@ -1448,26 +1471,33 @@ func handleReplay(db *DB) {
 		// Display both boards side by side
 		terminal.PrintReplayBoards(boardStates["red"], boardStates["blue"], entry.Message)
 
-		// Wait for user input to continue (except for the last entry)
+		// Handle progression based on mode
 		if i+skip < len(history) {
-			var input string
-			fmt.Print("Continue (Enter), quit (q), or jump to step number: ")
-			fmt.Scanln(&input)
-			
-			input = strings.ToLower(strings.TrimSpace(input))
-			if input == "q" {
-				fmt.Println("Replay ended by user")
-				return
-			}
-			
-			// Check if user wants to jump to a specific step
-			if input != "" {
-				if jumpTo, err := strconv.Atoi(input); err == nil && jumpTo > 0 && jumpTo <= len(history) {
-					i = jumpTo - 2 // -2 because loop will add skip
-					skip = 1 // Switch to single step mode after jump
+			if autoMode {
+				// Auto mode - just wait for the specified delay
+				time.Sleep(time.Duration(delayMs) * time.Millisecond)
+				clearTerminal()
+			} else {
+				// Interactive mode - wait for user input
+				var input string
+				fmt.Print("Continue (Enter), quit (q), or jump to step number: ")
+				fmt.Scanln(&input)
+				
+				input = strings.ToLower(strings.TrimSpace(input))
+				if input == "q" {
+					fmt.Println("Replay ended by user")
+					return
 				}
+				
+				// Check if user wants to jump to a specific step
+				if input != "" {
+					if jumpTo, err := strconv.Atoi(input); err == nil && jumpTo > 0 && jumpTo <= len(history) {
+						i = jumpTo - 2 // -2 because loop will add skip
+						skip = 1 // Switch to single step mode after jump
+					}
+				}
+				clearTerminal()
 			}
-			clearTerminal()
 		}
 	}
 
