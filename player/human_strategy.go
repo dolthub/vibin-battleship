@@ -4,7 +4,7 @@ type HumanStrategy struct{
 	playerColor string
 }
 
-func (h *HumanStrategy) GetNextMove(gameState string) string {
+func (h *HumanStrategy) GetNextMove(gameState string, lastMoveHit bool, sunkShipType string) string {
 	panic("HumanStrategy.GetNextMove should never be called - human players connect directly")
 }
 

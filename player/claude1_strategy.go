@@ -16,7 +16,7 @@ type ClaudeStrategy struct {
 	probabilityMap      map[string]int  // Probability weights for targeting
 }
 
-func (c *ClaudeStrategy) GetNextMove(gameState string) string {
+func (c *ClaudeStrategy) GetNextMove(gameState string, lastMoveHit bool, sunkShipType string) string {
 	// Initialize on first call
 	if c.UnattackedPositions == nil {
 		c.initializeStrategy()

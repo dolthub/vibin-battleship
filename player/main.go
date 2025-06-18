@@ -355,7 +355,7 @@ func playAIvsAIGame(player1, player2 *Player) {
 	
 	for {
 		// Make attack with current player
-		attackPos := currentPlayer.Strategy.GetNextMove("")
+		attackPos := currentPlayer.Strategy.GetNextMove("", false, "")
 		attackCmd := exec.Command("battleship", "attack", currentPlayer.GameID, currentPlayer.Color, attackPos)
 		attackOutput, err := attackCmd.Output()
 		
@@ -505,7 +505,7 @@ func playAIGame(player *Player) {
 		}
 		
 		// It's our turn, get a move and attack
-		attackPos := player.Strategy.GetNextMove("")
+		attackPos := player.Strategy.GetNextMove("", false, "")
 		attackCmd := exec.Command("battleship", "attack", player.GameID, player.Color, attackPos)
 		attackOutput, err := attackCmd.Output()
 		if err != nil {
@@ -635,7 +635,7 @@ func handlePrettyPlayerIO(player *Player, stdin io.WriteCloser, stdout, stderr i
 				shipIndex++
 			}
 		} else if strings.Contains(prompt, "Enter attack coordinate") || strings.Contains(prompt, "Your turn!") {
-			move := player.Strategy.GetNextMove("")
+			move := player.Strategy.GetNextMove("", false, "")
 			writeAndFlushStdin([]byte(move + "\n"))
 		}
 	}

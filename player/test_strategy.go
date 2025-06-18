@@ -7,7 +7,7 @@ type TestStrategy struct {
 	playerColor string // Player color (red or blue)
 }
 
-func (t *TestStrategy) GetNextMove(gameState string) string {
+func (t *TestStrategy) GetNextMove(gameState string, lastMoveHit bool, sunkShipType string) string {
 	rows := "ABCDEFGHIJ"
 	
 	var coordinate string

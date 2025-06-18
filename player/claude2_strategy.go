@@ -17,7 +17,7 @@ type Claude2Strategy struct {
 	gamePhase        string          // "hunt", "target", "cleanup"
 }
 
-func (c *Claude2Strategy) GetNextMove(gameState string) string {
+func (c *Claude2Strategy) GetNextMove(gameState string, lastMoveHit bool, sunkShipType string) string {
 	// Initialize on first call
 	if c.attackedPositions == nil {
 		c.initializeStrategy()

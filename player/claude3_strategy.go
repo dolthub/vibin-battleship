@@ -15,7 +15,7 @@ type Claude3Strategy struct {
 	currentHitIndex     int             // Index in hitPositions we're currently hunting
 }
 
-func (c *Claude3Strategy) GetNextMove(gameState string) string {
+func (c *Claude3Strategy) GetNextMove(gameState string, lastMoveHit bool, sunkShipType string) string {
 	// Initialize on first call
 	if c.attackedPositions == nil {
 		c.initializeStrategy()

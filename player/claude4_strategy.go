@@ -18,7 +18,7 @@ type Claude4Strategy struct {
 	targetQueue       []string           // Priority targets around hits
 }
 
-func (c *Claude4Strategy) GetNextMove(gameState string) string {
+func (c *Claude4Strategy) GetNextMove(gameState string, lastMoveHit bool, sunkShipType string) string {
 	// Initialize on first call
 	if c.attackedPositions == nil {
 		c.initializeStrategy()

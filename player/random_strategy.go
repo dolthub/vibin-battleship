@@ -11,7 +11,7 @@ type RandomStrategy struct {
 	unattackedPositions []string
 }
 
-func (r *RandomStrategy) GetNextMove(gameState string) string {
+func (r *RandomStrategy) GetNextMove(gameState string, lastMoveHit bool, sunkShipType string) string {
 	// Initialize the unattacked positions list if it doesn't exist
 	if r.unattackedPositions == nil {
 		r.unattackedPositions = make([]string, 0, 100)

@@ -200,7 +200,7 @@ func printUsage() {
 
 func handleNewGame(db *DB) {
 	gameID := uuid.New().String()
-	
+
 	// Parse optional player names from command line arguments
 	var redPlayer, bluePlayer string
 	if len(os.Args) >= 3 {
@@ -231,7 +231,7 @@ func handleNewGame(db *DB) {
 	} else {
 		commitMessage = fmt.Sprintf("Create new game %s", gameID)
 	}
-	
+
 	if err := db.CommitChanges(commitMessage); err != nil {
 		fmt.Printf("Failed to commit game creation: %v\n", err)
 		return
@@ -385,30 +385,30 @@ func handleJoinGame(db *DB) {
 		// Both players have joined and completed ship placement during the join process
 		// The second player can immediately start the game
 		fmt.Println("Both players have placed ships! Game starting...")
-		
+
 		// Ensure we're on the correct game branch
 		if err := db.CheckoutBranch(gameID); err != nil {
 			fmt.Printf("Failed to checkout game branch: %v\n", err)
 			return
 		}
-		
+
 		// In testing mode, don't start the game loop to avoid interfering with tests
 		if os.Getenv("BATTLESHIP_TESTING") == "true" {
 			fmt.Println("=== GAME READY TO START (testing mode) ===")
 			return
 		}
-		
+
 		clearTerminal()
 		fmt.Println("=== GAME STARTED ===")
 		playGameLoop(db, gameID, color)
 	} else {
 		// First player - in testing mode, just exit after showing waiting message
 		fmt.Println("Waiting for the other player to join...")
-		
+
 		if os.Getenv("BATTLESHIP_TESTING") == "true" {
 			return
 		}
-		
+
 		// In non-testing mode, wait for second player and then start game
 		// Wait for the second player to join
 		for {
@@ -424,10 +424,10 @@ func handleJoinGame(db *DB) {
 			}
 			time.Sleep(250 * time.Millisecond)
 		}
-		
+
 		// Both players have now joined
 		fmt.Println("Second player has joined!")
-		
+
 		// Wait for both players to place ships
 		fmt.Println("Waiting for both players to place ships...")
 		for {
@@ -441,15 +441,15 @@ func handleJoinGame(db *DB) {
 			}
 			time.Sleep(250 * time.Millisecond)
 		}
-		
+
 		fmt.Println("Both players have placed ships! Game starting...")
-		
+
 		// Ensure we're on the correct game branch
 		if err := db.CheckoutBranch(gameID); err != nil {
 			fmt.Printf("Failed to checkout game branch: %v\n", err)
 			return
 		}
-		
+
 		clearTerminal()
 		fmt.Println("=== GAME STARTED ===")
 		playGameLoop(db, gameID, color)
@@ -745,7 +745,7 @@ func handleAttack(db *DB) {
 		return
 	}
 
-	// Determine the target player (opponent of attacker) 
+	// Determine the target player (opponent of attacker)
 	var targetPlayer string
 	if player == "red" {
 		targetPlayer = "blue"
@@ -1277,7 +1277,7 @@ func handlePlace(db *DB) {
 	if playerCount == 0 {
 		// Generate random value for turn order
 		randomValue := rand.Float64()
-		
+
 		// Insert player's turn value
 		query := `INSERT INTO turn (player, value) VALUES (?, ?) 
 				  ON DUPLICATE KEY UPDATE value = VALUES(value)`
@@ -1369,11 +1369,11 @@ func handleReplay(db *DB) {
 	}
 
 	gameID := os.Args[2]
-	
+
 	// Parse optional flags
 	autoMode := false
 	delayMs := 1000 // Default 1 second delay in auto mode
-	
+
 	for i := 3; i < len(os.Args); i++ {
 		arg := os.Args[i]
 		if arg == "--auto" {
@@ -1424,15 +1424,10 @@ func handleReplay(db *DB) {
 
 	// Create terminal instance for display
 	terminal := New()
-	
-	fmt.Printf("Replaying game %s\n", gameID)
-	fmt.Printf("Found %d commits in game history\n", len(history))
-	
+
 	// Handle skip options and mode setup
 	skip := 1
 	if autoMode {
-		fmt.Printf("Auto-replay mode enabled with %dms delay between moves\n", delayMs)
-		fmt.Printf("Showing each move step by step (%d total moves)\n", len(history))
 		fmt.Println()
 	} else {
 		// Interactive mode - ask for skip option if many commits
@@ -1460,7 +1455,7 @@ func handleReplay(db *DB) {
 		entry := history[i]
 		fmt.Printf("\n--- Step %d/%d ---\n", i+1, len(history))
 		fmt.Printf("Time: %s\n", entry.Timestamp)
-		
+
 		// Get board state at this commit
 		boardStates, err := db.GetBoardStateAtCommit(gameID, entry.CommitHash)
 		if err != nil {
@@ -1482,18 +1477,18 @@ func handleReplay(db *DB) {
 				var input string
 				fmt.Print("Continue (Enter), quit (q), or jump to step number: ")
 				fmt.Scanln(&input)
-				
+
 				input = strings.ToLower(strings.TrimSpace(input))
 				if input == "q" {
 					fmt.Println("Replay ended by user")
 					return
 				}
-				
+
 				// Check if user wants to jump to a specific step
 				if input != "" {
 					if jumpTo, err := strconv.Atoi(input); err == nil && jumpTo > 0 && jumpTo <= len(history) {
 						i = jumpTo - 2 // -2 because loop will add skip
-						skip = 1 // Switch to single step mode after jump
+						skip = 1       // Switch to single step mode after jump
 					}
 				}
 				clearTerminal()
